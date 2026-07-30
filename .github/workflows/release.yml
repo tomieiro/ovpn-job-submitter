@@ -1,0 +1,124 @@
+name: Build and release executables
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install test dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Run tests
+        run: python -m pytest -m "not cluster"
+      - name: Validate release tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          PACKAGE_VERSION="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          test "${GITHUB_REF_NAME}" = "v${PACKAGE_VERSION}"
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            platform: linux
+            architecture: x86_64
+            asset: ovpn-job-submitter-linux-x86_64
+          - runner: windows-2022
+            platform: windows
+            architecture: x86_64
+            asset: ovpn-job-submitter-windows-x86_64.exe
+          - runner: macos-15
+            platform: macos
+            architecture: arm64
+            asset: ovpn-job-submitter-macos-arm64.pkg
+          - runner: macos-15-intel
+            platform: macos
+            architecture: x86_64
+            asset: ovpn-job-submitter-macos-x86_64.pkg
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install application and packager
+        run: python -m pip install . pyinstaller==6.21.0
+      - name: Build standalone executable
+        run: >-
+          python -m PyInstaller
+          --clean
+          --noconfirm
+          --onefile
+          --name ovpn-job-submitter
+          --collect-data dgx_slurm
+          submit_notebook.py
+      - name: Smoke-test Linux executable
+        if: matrix.platform == 'linux'
+        run: |
+          ./dist/ovpn-job-submitter --help
+          mv dist/ovpn-job-submitter "dist/${{ matrix.asset }}"
+          chmod +x "dist/${{ matrix.asset }}"
+      - name: Smoke-test Windows executable
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          & ".\dist\ovpn-job-submitter.exe" --help
+          Move-Item ".\dist\ovpn-job-submitter.exe" ".\dist\${{ matrix.asset }}"
+      - name: Build and test macOS installer
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          ./dist/ovpn-job-submitter --help
+          mkdir -p package-root/usr/local/bin
+          cp dist/ovpn-job-submitter package-root/usr/local/bin/
+          chmod 755 package-root/usr/local/bin/ovpn-job-submitter
+          PACKAGE_VERSION="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          pkgbuild \
+            --root package-root \
+            --identifier br.usp.c4ai.ovpn-job-submitter \
+            --version "${PACKAGE_VERSION}" \
+            --install-location / \
+            "dist/${{ matrix.asset }}"
+      - name: Upload executable
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.platform }}-${{ matrix.architecture }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${GITHUB_REF_NAME}"
+          release-assets/*
+          --verify-tag
+          --generate-notes
+          --title "ovpn-job-submitter ${GITHUB_REF_NAME}"
