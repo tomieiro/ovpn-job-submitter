@@ -8,17 +8,81 @@ startup.
 
 from __future__ import annotations
 
+import os
+import platform
 import shutil
-import stat
 import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Mapping
 
 from .errors import VPNError
 
 ProcessLauncher = Callable[..., "subprocess.Popen"]
+
+OPENVPN_WINDOWS_DOWNLOAD = "https://openvpn.net/community/"
+OPENVPN_LINUX_DOWNLOAD = (
+    "https://community.openvpn.net/Pages/OpenVPN%20software%20repos"
+)
+OPENVPN_MACOS_DOWNLOAD = "https://formulae.brew.sh/formula/openvpn"
+
+
+def discover_openvpn_binary(
+    system_name: str | None = None,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> str:
+    """Return the OpenVPN executable for Linux, Windows, or macOS."""
+    system_name = system_name or platform.system()
+    environ = os.environ if environ is None else environ
+
+    executable_names = (
+        ("openvpn.exe", "openvpn") if system_name == "Windows" else ("openvpn",)
+    )
+    for executable_name in executable_names:
+        executable = shutil.which(executable_name)
+        if executable:
+            return executable
+
+    candidates: list[Path] = []
+    if system_name == "Windows":
+        for variable in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"):
+            base = environ.get(variable)
+            if base:
+                candidates.append(Path(base) / "OpenVPN" / "bin" / "openvpn.exe")
+    elif system_name == "Darwin":
+        candidates.extend(
+            (
+                Path("/opt/homebrew/sbin/openvpn"),
+                Path("/usr/local/sbin/openvpn"),
+            )
+        )
+    elif system_name != "Linux":
+        raise VPNError(
+            f"unsupported operating system for automatic VPN startup: {system_name}"
+        )
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+
+    if system_name == "Windows":
+        install = (
+            "Install OpenVPN Community, then reopen the terminal: "
+            f"{OPENVPN_WINDOWS_DOWNLOAD}"
+        )
+    elif system_name == "Darwin":
+        install = (
+            "Install it with `brew install openvpn`: "
+            f"{OPENVPN_MACOS_DOWNLOAD}"
+        )
+    else:
+        install = (
+            "Install the OpenVPN package for your Linux distribution: "
+            f"{OPENVPN_LINUX_DOWNLOAD}"
+        )
+    raise VPNError(f"OpenVPN executable not found. {install}")
 
 
 class VPNConnection:
@@ -32,7 +96,10 @@ class VPNConnection:
         password: str,
         is_reachable: Callable[[], bool],
         process_launcher: ProcessLauncher = subprocess.Popen,
-        openvpn_binary: str = "openvpn",
+        openvpn_binary: str | None = None,
+        use_sudo: bool = False,
+        system_name: str | None = None,
+        verbosity: int = 1,
         connect_timeout: float = 60.0,
         poll_interval: float = 0.5,
         sleep: Callable[[float], None] = time.sleep,
@@ -44,6 +111,9 @@ class VPNConnection:
         self._is_reachable = is_reachable
         self._process_launcher = process_launcher
         self._openvpn_binary = openvpn_binary
+        self._use_sudo = use_sudo
+        self._system_name = system_name or platform.system()
+        self._verbosity = verbosity
         self._connect_timeout = connect_timeout
         self._poll_interval = poll_interval
         self._sleep = sleep
@@ -62,6 +132,9 @@ class VPNConnection:
             self._started_by_us = False
             return
 
+        openvpn_binary = self._openvpn_binary or discover_openvpn_binary(
+            self._system_name
+        )
         self._auth_dir = Path(tempfile.mkdtemp(prefix="dgx-slurm-"))
         self._auth_dir.chmod(0o700)
         auth_file = self._auth_dir / "auth"
@@ -70,16 +143,30 @@ class VPNConnection:
 
         try:
             command = [
-                self._openvpn_binary,
+                openvpn_binary,
                 "--config",
                 str(self._ovpn_path),
                 "--auth-user-pass",
                 str(auth_file),
                 "--auth-nocache",
+                "--verb",
+                str(self._verbosity),
             ]
-            self._process = self._process_launcher(
-                command, cwd=str(self._ovpn_path.parent)
-            )
+            get_effective_uid = getattr(os, "geteuid", lambda: 1)
+            if (
+                self._use_sudo
+                and self._system_name in {"Linux", "Darwin"}
+                and get_effective_uid() != 0
+            ):
+                command = ["sudo", "--", *command]
+            try:
+                self._process = self._process_launcher(
+                    command, cwd=str(self._ovpn_path.parent)
+                )
+            except OSError as exc:
+                raise VPNError(
+                    f"could not start OpenVPN executable: {exc}"
+                ) from exc
             self._wait_until_ready()
             self._started_by_us = True
         finally:
@@ -102,9 +189,15 @@ class VPNConnection:
         while True:
             exit_code = self._process.poll()
             if exit_code is not None:
+                hint = (
+                    " On Windows, run the terminal as Administrator or connect "
+                    "with OpenVPN GUI before running the script."
+                    if self._system_name == "Windows"
+                    else ""
+                )
                 raise VPNError(
                     f"openvpn exited prematurely with code {exit_code} "
-                    f"before the cluster became reachable"
+                    f"before the cluster became reachable.{hint}"
                 )
             if self._is_reachable():
                 return

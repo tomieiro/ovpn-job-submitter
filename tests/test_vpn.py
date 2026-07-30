@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 
 from dgx_slurm.errors import VPNError
-from dgx_slurm.vpn import VPNConnection
+from dgx_slurm import vpn
+from dgx_slurm.vpn import VPNConnection, discover_openvpn_binary
 
 
 class FakeProcess:
@@ -42,7 +43,13 @@ def ovpn_file(tmp_path):
     return ovpn
 
 
-def make_connection(ovpn_file, reachable_sequence, launched, exit_code=None, connect_timeout=5.0):
+def make_connection(
+    ovpn_file,
+    reachable_sequence,
+    launched,
+    exit_code=None,
+    connect_timeout=5.0,
+):
     reachable_iter = iter(reachable_sequence)
 
     def is_reachable():
@@ -62,6 +69,7 @@ def make_connection(ovpn_file, reachable_sequence, launched, exit_code=None, con
         password="s3cret",
         is_reachable=is_reachable,
         process_launcher=process_launcher,
+        openvpn_binary="openvpn",
         connect_timeout=connect_timeout,
         poll_interval=0.0,
         sleep=lambda _: None,
@@ -77,6 +85,16 @@ def test_executes_openvpn_with_config(ovpn_file):
     assert cmd[0] == "openvpn"
     assert "--config" in cmd
     assert str(ovpn_file) in cmd
+    assert cmd[-2:] == ["--verb", "1"]
+
+
+def test_can_launch_only_openvpn_through_sudo(ovpn_file, monkeypatch):
+    launched = []
+    monkeypatch.setattr(os, "geteuid", lambda: 1000)
+    conn = make_connection(ovpn_file, [False, True], launched)
+    conn._use_sudo = True
+    conn.connect()
+    assert launched[0].args[:3] == ["sudo", "--", "openvpn"]
 
 
 def test_uses_ovpn_directory_as_cwd(ovpn_file):
@@ -106,6 +124,7 @@ def test_creates_auth_file_with_mode_0600(ovpn_file):
         password="s3cret",
         is_reachable=iter([False, True]).__next__,
         process_launcher=process_launcher,
+        openvpn_binary="openvpn",
         connect_timeout=5.0,
         poll_interval=0.0,
         sleep=lambda _: None,
@@ -130,6 +149,7 @@ def test_creates_auth_dir_with_mode_0700(ovpn_file):
         password="s3cret",
         is_reachable=iter([False, True]).__next__,
         process_launcher=process_launcher,
+        openvpn_binary="openvpn",
         connect_timeout=5.0,
         poll_interval=0.0,
         sleep=lambda _: None,
@@ -196,3 +216,63 @@ def test_timeout_raises_vpn_error_without_password(ovpn_file):
     with pytest.raises(VPNError) as exc_info:
         conn.connect()
     assert "s3cret" not in str(exc_info.value)
+
+
+def test_discovers_linux_openvpn_from_path(monkeypatch):
+    monkeypatch.setattr(vpn.shutil, "which", lambda name: "/usr/sbin/openvpn")
+    assert discover_openvpn_binary("Linux") == "/usr/sbin/openvpn"
+
+
+def test_discovers_macos_homebrew_openvpn(monkeypatch):
+    monkeypatch.setattr(vpn.shutil, "which", lambda name: None)
+    monkeypatch.setattr(
+        vpn.Path,
+        "is_file",
+        lambda path: str(path) == "/opt/homebrew/sbin/openvpn",
+    )
+    assert discover_openvpn_binary("Darwin") == "/opt/homebrew/sbin/openvpn"
+
+
+def test_discovers_windows_openvpn_in_program_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(vpn.shutil, "which", lambda name: None)
+    executable = tmp_path / "OpenVPN" / "bin" / "openvpn.exe"
+    executable.parent.mkdir(parents=True)
+    executable.touch()
+    assert discover_openvpn_binary(
+        "Windows", environ={"ProgramFiles": str(tmp_path)}
+    ) == str(executable)
+
+
+@pytest.mark.parametrize(
+    ("system_name", "expected"),
+    [
+        ("Linux", "OpenVPN package"),
+        ("Darwin", "brew install openvpn"),
+        ("Windows", "openvpn.net/community"),
+    ],
+)
+def test_missing_openvpn_has_platform_install_help(
+    system_name, expected, monkeypatch
+):
+    monkeypatch.setattr(vpn.shutil, "which", lambda name: None)
+    monkeypatch.setattr(vpn.Path, "is_file", lambda path: False)
+    with pytest.raises(VPNError) as exc_info:
+        discover_openvpn_binary(system_name, environ={})
+    assert expected in str(exc_info.value)
+
+
+def test_windows_never_uses_sudo(ovpn_file):
+    launched = []
+    conn = make_connection(ovpn_file, [False, True], launched)
+    conn._use_sudo = True
+    conn._system_name = "Windows"
+    conn.connect()
+    assert launched[0].args[0] == "openvpn"
+
+
+def test_windows_permission_failure_has_actionable_message(ovpn_file):
+    launched = []
+    conn = make_connection(ovpn_file, [False], launched, exit_code=1)
+    conn._system_name = "Windows"
+    with pytest.raises(VPNError, match="Administrator"):
+        conn.connect()

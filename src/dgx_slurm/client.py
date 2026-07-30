@@ -19,16 +19,11 @@ from .ssh import SSHTransport
 from .storage import LocalJobStore
 from .vpn import VPNConnection
 
-# Internal cluster configuration. Not exposed as constructor parameters:
-# per the library's design, callers only ever provide an .ovpn file and a
-# username. Adjust these for your DGX/SLURM deployment.
-DEFAULT_SSH_HOST = "dgx.cluster.internal"
-DEFAULT_SSH_PORT = 22
 DEFAULT_REMOTE_BASE_DIR = "dgx-slurm-jobs"
 DEFAULT_JOB_STORE_PATH = Path.home() / ".dgx-slurm" / "jobs.json"
 
 
-def _default_is_reachable(host: str = DEFAULT_SSH_HOST, port: int = DEFAULT_SSH_PORT) -> Callable[[], bool]:
+def _default_is_reachable(host: str, port: int) -> Callable[[], bool]:
     def check() -> bool:
         try:
             with socket.create_connection((host, port), timeout=2):
@@ -47,6 +42,10 @@ class DGXClient:
         *,
         ovpn: Path | str,
         username: str,
+        ssh_host: str,
+        ssh_port: int,
+        known_hosts_path: Path | str | None = None,
+        sudo_openvpn: bool = True,
         vpn: VPNConnection | None = None,
         transport: SSHTransport | None = None,
         bundle_builder: NotebookBundleBuilder | None = None,
@@ -59,6 +58,10 @@ class DGXClient:
     ) -> None:
         self._ovpn_path = Path(ovpn)
         self._username = username
+        self._ssh_host = ssh_host
+        self._ssh_port = ssh_port
+        self._known_hosts_path = known_hosts_path
+        self._sudo_openvpn = sudo_openvpn
         self._vpn = vpn
         self._transport = transport
         self._bundle_builder = bundle_builder or NotebookBundleBuilder()
@@ -147,16 +150,20 @@ class DGXClient:
                 ovpn_path=self._ovpn_path,
                 username=self._username,
                 password=self._get_password(),
-                is_reachable=_default_is_reachable(),
+                is_reachable=_default_is_reachable(
+                    self._ssh_host, self._ssh_port
+                ),
+                use_sudo=self._sudo_openvpn,
             )
         self._vpn.connect()
 
         if self._transport is None:
             self._transport = SSHTransport(
-                host=DEFAULT_SSH_HOST,
-                port=DEFAULT_SSH_PORT,
+                host=self._ssh_host,
+                port=self._ssh_port,
                 username=self._username,
                 password=self._get_password(),
+                known_hosts_path=self._known_hosts_path,
             )
         self._transport.connect()
 

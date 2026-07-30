@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shlex
 
 from .errors import SchedulerError
@@ -42,6 +43,8 @@ class SlurmScheduler:
 
         raw_state, exit_code = self._sacct_state(job_id)
         if not raw_state:
+            raw_state, exit_code = self._scontrol_state(job_id)
+        if not raw_state:
             return JobStatus(job_id=job_id, state=JobState.UNKNOWN, exit_code=None, raw_state="")
         return JobStatus(
             job_id=job_id,
@@ -81,3 +84,18 @@ class SlurmScheduler:
                     exit_code = int(code_part)
             return state.strip(), exit_code
         return "", None
+
+    def _scontrol_state(self, job_id: str) -> tuple[str, int | None]:
+        """Fallback for clusters whose accounting database omits recent jobs."""
+        command = f"scontrol show job -o {shlex.quote(job_id)}"
+        result = self._transport.execute(command)
+        if result.exit_code != 0 or not result.stdout.strip():
+            return "", None
+
+        state_match = re.search(r"(?:^|\s)JobState=(\S+)", result.stdout)
+        exit_match = re.search(r"(?:^|\s)ExitCode=(-?\d+):\d+", result.stdout)
+        if state_match is None:
+            return "", None
+
+        exit_code = int(exit_match.group(1)) if exit_match else None
+        return state_match.group(1), exit_code

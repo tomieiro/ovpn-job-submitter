@@ -22,7 +22,12 @@ async def main() -> None:
 
     ovpn, username = sys.argv[1], sys.argv[2]
 
-    client = DGXClient(ovpn=ovpn, username=username)
+    client = DGXClient(
+        ovpn=ovpn,
+        username=username,
+        ssh_host="c4aiscm2",
+        ssh_port=22,
+    )
     try:
         job = client.submit(
             "experiment.ipynb",

@@ -69,6 +69,7 @@ def test_runs_docker_build(build):
     bundle_root = build(Resources())
     content = (bundle_root / "runImage.slurm").read_text()
     assert re.search(r"docker build\s", content)
+    assert "--quiet" in content
 
 
 def test_runs_docker_run_with_rm(build):

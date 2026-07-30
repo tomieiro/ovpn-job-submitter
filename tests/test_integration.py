@@ -143,6 +143,8 @@ async def test_full_submit_and_wait_flow(tmp_path):
     client = DGXClient(
         ovpn=ovpn_file,
         username="cluster-user",
+        ssh_host="cluster.internal",
+        ssh_port=22,
         vpn=vpn,
         transport=transport,
         scheduler=scheduler,
