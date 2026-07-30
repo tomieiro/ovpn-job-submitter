@@ -23,3 +23,13 @@ def test_every_platform_smoke_tests_the_frozen_executable():
     content = WORKFLOW.read_text()
     assert "./dist/ovpn-job-submitter --help" in content
     assert '& ".\\dist\\ovpn-job-submitter.exe" --help' in content
+
+
+def test_release_command_has_explicit_repository_context():
+    content = WORKFLOW.read_text()
+    release_start = content.index("- name: Publish GitHub Release")
+    release_step = content[release_start:]
+
+    assert "GH_TOKEN: ${{ github.token }}" in release_step
+    assert "GH_REPO: ${{ github.repository }}" in release_step
+    assert 'gh release create "${GITHUB_REF_NAME}"' in release_step
