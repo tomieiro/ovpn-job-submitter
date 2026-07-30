@@ -4,15 +4,31 @@ Envia um notebook Jupyter ao cluster SLURM do C4AI pela VPN da USP,
 acompanha a execução e baixa o `.ipynb` completo, com todas as células
 executadas.
 
-## 1. Instale a biblioteca
+## 1. Baixe o programa
 
-Python 3.10 ou mais recente é necessário. Dentro deste repositório, execute:
+Baixe a versão mais recente em
+[GitHub Releases](https://github.com/tomieiro/ovpn-job-submitter/releases/latest):
+
+- **Windows:** `ovpn-job-submitter-windows-x86_64.exe`
+- **Linux:** `ovpn-job-submitter-linux-x86_64`
+- **Mac Apple Silicon (M1 ou mais recente):**
+  `ovpn-job-submitter-macos-arm64.pkg`
+- **Mac Intel:** `ovpn-job-submitter-macos-x86_64.pkg`
+
+O executável já contém o Python e todas as dependências da biblioteca.
+
+No Linux, permita a execução e, opcionalmente, instale o comando:
 
 ```bash
-python -m pip install -e '.[runner]'
+chmod +x ovpn-job-submitter-linux-x86_64
+sudo mv ovpn-job-submitter-linux-x86_64 /usr/local/bin/ovpn-job-submitter
 ```
 
-No Windows, use `py` no lugar de `python` se necessário.
+No macOS, abra o `.pkg`; ele instala o comando `ovpn-job-submitter` em
+`/usr/local/bin`.
+
+Os executáveis ainda não possuem assinatura comercial. Windows e macOS podem
+pedir uma confirmação adicional antes da primeira execução.
 
 ## 2. Instale o OpenVPN
 
@@ -64,33 +80,43 @@ certificados referenciados por ele.
 
 ## 4. Rode o notebook
 
-Este é o script completo:
+No Linux ou macOS:
 
-```python
-from dgx_slurm import run_notebook
-
-run_notebook(
-    "project/experimento.ipynb",
-    include_project_files=True,
-    vpn_dir="SSH",
-    ssh_host="c4aiscm2",
-    ssh_port=22,
-    partition="devwork",
-    gpus=1,
-    cpus=8,
-    memory="0",
-    time_limit="04:00:00",
-)
+```bash
+ovpn-job-submitter project/experimento.ipynb SSH --include-files
 ```
 
-Altere o caminho do notebook e use `include_project_files=False` quando não
-quiser enviar os outros arquivos da pasta `project`.
+No PowerShell:
 
-O diretório da VPN, endereço SSH e todos os recursos do SLURM são obrigatórios.
-A biblioteca não escolhe silenciosamente infraestrutura ou custos de
-processamento.
+```powershell
+.\ovpn-job-submitter-windows-x86_64.exe `
+  "project\experimento.ipynb" "SSH" --include-files
+```
 
-Durante a execução, ela:
+No CMD:
+
+```bat
+ovpn-job-submitter-windows-x86_64.exe "project\experimento.ipynb" "SSH" --include-files
+```
+
+Omita `--include-files` para enviar somente o notebook. Caminhos que contêm
+espaços devem ficar entre aspas.
+
+O notebook e a pasta da VPN são obrigatórios. Os demais valores são opcionais:
+
+```text
+--ssh-host c4aiscm2
+--ssh-port 22
+--partition devwork
+--gpus 1
+--cpus 8
+--memory 0
+--time-limit 04:00:00
+```
+
+Consulte todas as opções com `ovpn-job-submitter --help`.
+
+Durante a execução, o programa:
 
 1. valida o `.ovpn` e identifica o usuário pelo certificado;
 2. localiza o OpenVPN adequado ao sistema e abre a VPN, se necessário;
@@ -109,11 +135,20 @@ notebook ou incluídas na imagem do container. Exemplo:
 %pip install -q xarray netcdf4 cartopy
 ```
 
-## Opções adicionais
+## Uso como biblioteca Python
 
-O usuário inferido do certificado e o caminho de saída podem ser substituídos:
+Para desenvolvimento ou integração com outro código, Python 3.10 ou mais
+recente é necessário. Dentro deste repositório:
+
+```bash
+python -m pip install -e '.[runner]'
+```
+
+Então use a API:
 
 ```python
+from dgx_slurm import run_notebook
+
 result = run_notebook(
     "project/experimento.ipynb",
     include_project_files=True,
@@ -134,7 +169,21 @@ print(result.executed_notebook)
 Para controlar manualmente o ciclo de vida, use `DGXClient.submit()` e
 `await DGXJob.wait()`.
 
-## Testes
+## Releases
+
+Cada tag no formato `v*` executa os testes, gera os quatro artefatos e publica
+automaticamente uma GitHub Release. Exemplo para a versão declarada em
+`pyproject.toml`:
+
+```bash
+git tag v0.3.0
+git push origin v0.3.0
+```
+
+O workflow também pode ser executado manualmente no GitHub Actions para testar
+os builds sem publicar uma Release.
+
+## Desenvolvimento e testes
 
 ```bash
 python -m pytest -m "not cluster"
