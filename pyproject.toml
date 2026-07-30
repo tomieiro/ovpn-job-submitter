@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dgx-slurm"
+version = "0.1.0"
+description = "Submit Jupyter notebooks to a SLURM-managed DGX cluster over OpenVPN/SSH/Docker"
+requires-python = ">=3.10"
+dependencies = [
+    "paramiko>=3.4",
+]
+
+[project.optional-dependencies]
+runner = [
+    "nbclient>=0.10",
+    "nbformat>=5.10",
+    "ipykernel>=6.29",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "nbclient>=0.10",
+    "nbformat>=5.10",
+    "ipykernel>=6.29",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+dgx_slurm = ["templates/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "cluster: real-cluster smoke test (opt-in, requires network/VPN access)",
+]
