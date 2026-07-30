@@ -11,6 +11,7 @@ from .errors import (
 )
 from .job import DGXJob
 from .models import JobResult, JobState, JobStatus, Resources
+from .workflow import run_notebook, run_notebook_async
 
 __all__ = [
     "BundleError",
@@ -27,4 +28,6 @@ __all__ = [
     "SSHError",
     "SubmissionError",
     "VPNError",
+    "run_notebook",
+    "run_notebook_async",
 ]

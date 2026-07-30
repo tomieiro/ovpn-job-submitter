@@ -17,11 +17,12 @@ action without any cluster access.
 
 ## Against a real cluster
 
-These need a real `.ovpn` file, a real cluster username, and
-`DEFAULT_SSH_HOST` / `DEFAULT_REMOTE_BASE_DIR` in
-[`src/dgx_slurm/client.py`](../src/dgx_slurm/client.py) set to your actual
-DGX endpoint (they're placeholders in this repo). You'll be prompted for
-your password via `getpass`.
+For the standard C4AI directory layout, prefer the high-level API documented
+in the repository [README](../README.md). The VPN directory, SSH endpoint,
+and SLURM resources are explicit; only the username is inferred.
+
+The examples below demonstrate the lower-level API and therefore receive the
+`.ovpn` path and username explicitly. You'll be prompted for your password.
 
 - **`basic_usage.py`** — the canonical `submit()` + `await job.wait()` flow.
   ```bash

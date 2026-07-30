@@ -30,7 +30,12 @@ async def test_gpu_notebook():
 
     notebook = Path(__file__).parent / "fixtures" / "gpu_smoke.ipynb"
 
-    client = DGXClient(ovpn=ovpn, username=username)
+    client = DGXClient(
+        ovpn=ovpn,
+        username=username,
+        ssh_host="c4aiscm2",
+        ssh_port=22,
+    )
     try:
         job = client.submit(
             notebook,

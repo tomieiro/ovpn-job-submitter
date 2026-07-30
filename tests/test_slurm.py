@@ -95,9 +95,23 @@ def test_sacct_returns_exit_code(scheduler, transport):
     assert status.exit_code == 3
 
 
-def test_status_unknown_when_no_squeue_or_sacct_record(scheduler, transport):
+def test_scontrol_returns_failed_when_sacct_has_no_record(scheduler, transport):
     transport.responses["squeue"] = ("", "", 0)
     transport.responses["sacct"] = ("", "", 0)
+    transport.responses["scontrol"] = (
+        "JobId=48192 JobState=FAILED Reason=NonZeroExitCode ExitCode=1:0\n",
+        "",
+        0,
+    )
+    status = scheduler.status("48192")
+    assert status.state is JobState.FAILED
+    assert status.exit_code == 1
+
+
+def test_status_unknown_when_no_scheduler_has_record(scheduler, transport):
+    transport.responses["squeue"] = ("", "", 0)
+    transport.responses["sacct"] = ("", "", 0)
+    transport.responses["scontrol"] = ("", "Invalid job id", 1)
     status = scheduler.status("48192")
     assert status.state is JobState.UNKNOWN
 

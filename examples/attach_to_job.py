@@ -23,7 +23,12 @@ async def main() -> None:
 
     ovpn, username, job_id = sys.argv[1], sys.argv[2], sys.argv[3]
 
-    client = DGXClient(ovpn=ovpn, username=username)
+    client = DGXClient(
+        ovpn=ovpn,
+        username=username,
+        ssh_host="c4aiscm2",
+        ssh_port=22,
+    )
     try:
         job = client.attach(job_id)
         print(f"Reattached to job {job.id}, current status: {job.status().state.value}")

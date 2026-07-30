@@ -1,9 +1,9 @@
 #!/usr/bin/env python
-"""Canonical usage against a real DGX/SLURM cluster.
+"""Low-level usage against a real DGX/SLURM cluster.
 
-Before running this, edit client.py's DEFAULT_SSH_HOST / DEFAULT_REMOTE_BASE_DIR
-(src/dgx_slurm/client.py) to match your actual cluster, and point --ovpn at a
-real .ovpn file. You will be prompted for your cluster password via getpass.
+Point --ovpn at a real .ovpn file. You will be prompted for your cluster
+password via getpass. For the shortest C4AI workflow, see README.md's
+``run_notebook`` example.
 
 Run:
     python examples/basic_usage.py /path/to/client.ovpn cluster-user experiment.ipynb
@@ -25,7 +25,12 @@ async def main() -> None:
 
     ovpn, username, notebook = sys.argv[1], sys.argv[2], sys.argv[3]
 
-    client = DGXClient(ovpn=ovpn, username=username)
+    client = DGXClient(
+        ovpn=ovpn,
+        username=username,
+        ssh_host="c4aiscm2",
+        ssh_port=22,
+    )
     try:
         job = client.submit(
             notebook,

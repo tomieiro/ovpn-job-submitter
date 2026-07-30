@@ -157,6 +157,8 @@ async def main() -> None:
     client = DGXClient(
         ovpn="/dev/null",  # unused: vpn/transport are injected below
         username="local-demo",
+        ssh_host="local.invalid",
+        ssh_port=22,
         vpn=NoopVPN(),
         transport=LocalFilesystemTransport(remote_root),
         scheduler=LocalProcessScheduler(remote_root),

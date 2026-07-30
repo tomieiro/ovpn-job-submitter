@@ -1,3 +1,4 @@
+import inspect
 from pathlib import Path
 
 import nbformat
@@ -100,6 +101,8 @@ def make_client(project, tmp_path, client_parts, ovpn_file=None):
     return DGXClient(
         ovpn=ovpn_file,
         username="cluster-user",
+        ssh_host="cluster.internal",
+        ssh_port=22,
         vpn=vpn,
         transport=transport,
         scheduler=scheduler,
@@ -107,6 +110,12 @@ def make_client(project, tmp_path, client_parts, ovpn_file=None):
         workdir_root=tmp_path / "bundles",
         project_root=project,
     )
+
+
+def test_ssh_endpoint_is_required():
+    signature = inspect.signature(DGXClient)
+    assert signature.parameters["ssh_host"].default is inspect.Parameter.empty
+    assert signature.parameters["ssh_port"].default is inspect.Parameter.empty
 
 
 def test_submit_validates_notebook(project, tmp_path, client_parts):
