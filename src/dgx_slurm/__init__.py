@@ -8,12 +8,14 @@ from .errors import (
     SubmissionError,
     VPNError,
 )
+from .job import DGXJob
 from .models import JobResult, JobState, JobStatus, Resources
 
 __all__ = [
     "BundleError",
     "ConfigurationError",
     "DGXError",
+    "DGXJob",
     "JobResult",
     "JobState",
     "JobStatus",
