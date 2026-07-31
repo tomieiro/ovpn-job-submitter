@@ -1,3 +1,4 @@
+from .client import DGXClient
 from .errors import (
     BundleError,
     ConfigurationError,
@@ -14,6 +15,7 @@ from .models import JobResult, JobState, JobStatus, Resources
 __all__ = [
     "BundleError",
     "ConfigurationError",
+    "DGXClient",
     "DGXError",
     "DGXJob",
     "JobResult",
