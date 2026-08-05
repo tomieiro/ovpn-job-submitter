@@ -171,6 +171,46 @@ def test_wraps_connect_failure_as_ssh_error(client_factory):
         transport.connect()
 
 
+def test_unknown_host_key_error_explains_how_to_trust_the_server():
+    class RejectingClient(FakeSSHClient):
+        def __init__(self):
+            super().__init__()
+            self.raise_on_connect = paramiko.SSHException(
+                "Server 'dgx.cluster.internal' not found in known_hosts"
+            )
+
+    transport = make_transport(client_factory=RejectingClient)
+    with pytest.raises(SSHError) as exc_info:
+        transport.connect()
+    assert "ssh cluster-user@dgx.cluster.internal" in str(exc_info.value)
+
+
+def test_unknown_host_key_hint_includes_custom_port():
+    class RejectingClient(FakeSSHClient):
+        def __init__(self):
+            super().__init__()
+            self.raise_on_connect = paramiko.SSHException(
+                "not found in known_hosts"
+            )
+
+    transport = make_transport(client_factory=RejectingClient, port=2222)
+    with pytest.raises(SSHError) as exc_info:
+        transport.connect()
+    assert "ssh -p 2222 cluster-user@dgx.cluster.internal" in str(exc_info.value)
+
+
+def test_other_ssh_errors_do_not_get_known_hosts_hint():
+    class RaisingClient(FakeSSHClient):
+        def __init__(self):
+            super().__init__()
+            self.raise_on_connect = paramiko.AuthenticationException("bad auth")
+
+    transport = make_transport(client_factory=RaisingClient)
+    with pytest.raises(SSHError) as exc_info:
+        transport.connect()
+    assert "known_hosts" not in str(exc_info.value)
+
+
 def test_creates_remote_directory(client_factory):
     transport = make_transport(client_factory)
     transport.connect()

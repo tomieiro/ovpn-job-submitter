@@ -79,12 +79,26 @@ class SSHTransport:
                 timeout=self._connect_timeout,
             )
         except paramiko.SSHException as exc:
-            raise SSHError(f"SSH connection to {self._host} failed: {exc}") from exc
+            raise SSHError(
+                f"SSH connection to {self._host} failed: {exc}"
+                f"{self._known_hosts_hint(exc)}"
+            ) from exc
         except OSError as exc:
             raise SSHError(f"SSH connection to {self._host} failed: {exc}") from exc
 
         self._client = client
         self._sftp = client.open_sftp()
+
+    def _known_hosts_hint(self, exc: Exception) -> str:
+        """Explain how to trust the server when its key is unknown."""
+        if "known_hosts" not in str(exc):
+            return ""
+        port_flag = "" if self._port == 22 else f"-p {self._port} "
+        return (
+            f". Connect once with `ssh {port_flag}{self._username}@{self._host}` "
+            "while the VPN is up, check the fingerprint and accept the key so "
+            "it is saved to known_hosts."
+        )
 
     def execute(self, command: str) -> RemoteCommandResult:
         self._require_connected()
