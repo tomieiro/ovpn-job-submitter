@@ -102,8 +102,19 @@ aberto sem privilégios de administrador, a janela avisa e oferece o botão
 Os demais valores (partição, GPUs, CPUs, memória, tempo) usam os mesmos padrões
 da linha de comando; para alterá-los, use o executável de terminal.
 
-A partir do repositório, a mesma janela abre com `python -m dgx_slurm.gui`
-(ou `ovpn-job-submitter-gui`, depois do `pip install`).
+A mesma janela pode ser aberta a partir do repositório, mas o pacote precisa
+ser instalado antes (o código fica em `src/`, então rodar de dentro da pasta
+não basta):
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\ovpn-job-submitter-gui.exe
+```
+
+Para abrir com privilégios, clique com o botão direito em
+`.venv\Scripts\ovpn-job-submitter-gui.exe` e escolha **Executar como
+administrador** — ou use o botão da própria janela.
 
 ### Pela linha de comando
 
