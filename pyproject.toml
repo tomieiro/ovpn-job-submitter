@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dgx-slurm"
-version = "0.3.0"
+version = "1.0.0"
 description = "Submit Jupyter notebooks to a SLURM-managed DGX cluster over OpenVPN/SSH/Docker"
 requires-python = ">=3.10"
 dependencies = [
