@@ -146,6 +146,11 @@ ovpn-job-submitter-windows-x86_64.exe "project\experimento.ipynb" "SSH" --includ
 Omita `--include-files` para enviar somente o notebook. Caminhos que contêm
 espaços devem ficar entre aspas.
 
+Cada execução com `--include-files` (ou com a caixa marcada na janela)
+empacota e reenvia **todos** os arquivos da pasta do notebook. Com centenas de
+megabytes, o envio leva vários minutos: o programa informa o total, cada
+arquivo e a porcentagem concluída enquanto isso acontece.
+
 O notebook e a pasta da VPN são obrigatórios. Os demais valores são opcionais:
 
 ```text

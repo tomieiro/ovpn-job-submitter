@@ -53,6 +53,7 @@ class DGXClient:
         job_store: LocalJobStore | None = None,
         password_provider: Callable[[], str] = getpass.getpass,
         host_key_confirmer: Callable[[str, str], bool] | None = None,
+        print_fn: Callable[[str], None] = print,
         workdir_root: Path | None = None,
         project_root: Path | None = None,
         job_name_factory: Callable[[], str] = lambda: f"dgx-notebook-{uuid.uuid4().hex[:8]}",
@@ -70,6 +71,7 @@ class DGXClient:
         self._job_store = job_store or LocalJobStore(DEFAULT_JOB_STORE_PATH)
         self._password_provider = password_provider
         self._host_key_confirmer = host_key_confirmer
+        self._print_fn = print_fn
         self._workdir_root = Path(workdir_root) if workdir_root else Path(tempfile.gettempdir())
         self._project_root = Path(project_root) if project_root else Path.cwd()
         self._job_name_factory = job_name_factory
@@ -94,6 +96,7 @@ class DGXClient:
         job_name = self._job_name_factory()
         remote_job_dir = f"{DEFAULT_REMOTE_BASE_DIR}/{job_name}"
 
+        self._print_fn("Empacotando o notebook e os arquivos incluídos...")
         bundle_root = self._bundle_builder.build(
             notebook=notebook,
             job_name=job_name,
@@ -107,6 +110,7 @@ class DGXClient:
         self._transport.execute(f"mkdir -p {shlex.quote(remote_job_dir)}/outputs")
         self._transport.upload_directory(bundle_root, remote_job_dir)
 
+        self._print_fn("Submetendo ao SLURM...")
         job_id = self._scheduler.submit(remote_job_dir)
 
         self._job_store.save(
@@ -157,8 +161,10 @@ class DGXClient:
                 ),
                 use_sudo=self._sudo_openvpn,
             )
+        self._print_fn("Conectando à VPN, se necessário...")
         self._vpn.connect()
 
+        self._print_fn(f"Conectando a {self._ssh_host} por SSH...")
         if self._transport is None:
             self._transport = SSHTransport(
                 host=self._ssh_host,
@@ -167,6 +173,7 @@ class DGXClient:
                 password=self._get_password(),
                 known_hosts_path=self._known_hosts_path,
                 host_key_confirmer=self._host_key_confirmer,
+                print_fn=self._print_fn,
             )
         self._transport.connect()
 

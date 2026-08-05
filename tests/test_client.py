@@ -93,7 +93,7 @@ def client_parts(tmp_path):
     return calls, vpn, transport, scheduler, store
 
 
-def make_client(project, tmp_path, client_parts, ovpn_file=None):
+def make_client(project, tmp_path, client_parts, ovpn_file=None, **overrides):
     calls, vpn, transport, scheduler, store = client_parts
     ovpn_file = ovpn_file or (tmp_path / "client.ovpn")
     if not ovpn_file.exists():
@@ -109,7 +109,23 @@ def make_client(project, tmp_path, client_parts, ovpn_file=None):
         job_store=store,
         workdir_root=tmp_path / "bundles",
         project_root=project,
+        **overrides,
     )
+
+
+def test_submit_narrates_the_steps_that_take_minutes(
+    project, tmp_path, client_parts
+):
+    """Silence during packing and upload is indistinguishable from a freeze."""
+    printed = []
+    client = make_client(project, tmp_path, client_parts, print_fn=printed.append)
+    nb = make_notebook(project / "experiment.ipynb")
+    client.submit(nb, resources=Resources())
+
+    assert any("VPN" in line for line in printed)
+    assert any("cluster.internal por SSH" in line for line in printed)
+    assert "Empacotando o notebook e os arquivos incluídos..." in printed
+    assert "Submetendo ao SLURM..." in printed
 
 
 def test_ssh_endpoint_is_required():

@@ -12,6 +12,7 @@ import hashlib
 import os
 import socket
 import stat
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -21,6 +22,21 @@ import paramiko
 from .errors import SSHError
 
 DEFAULT_KNOWN_HOSTS = Path.home() / ".ssh" / "known_hosts"
+
+
+def format_size(num_bytes: float) -> str:
+    """Sizes readable enough to tell a stalled transfer from a slow one."""
+    for unit in ("B", "KB", "MB", "GB"):
+        if abs(num_bytes) < 1024 or unit == "GB":
+            precision = 0 if unit == "B" else 1
+            return f"{num_bytes:.{precision}f} {unit}"
+        num_bytes /= 1024
+    return f"{num_bytes:.1f} GB"
+
+
+def format_duration(seconds: float) -> str:
+    minutes, seconds = divmod(int(seconds), 60)
+    return f"{minutes}m{seconds:02d}s" if minutes else f"{seconds}s"
 
 
 @dataclass(frozen=True)
@@ -104,6 +120,9 @@ class SSHTransport:
         connect_timeout: float = 30.0,
         host_key_confirmer: HostKeyConfirmer | None = None,
         key_fetcher: Callable[[str, int], paramiko.PKey] = fetch_host_key,
+        print_fn: Callable[[str], None] = print,
+        progress_interval: float = 5.0,
+        now: Callable[[], float] = time.monotonic,
     ) -> None:
         self._host = host
         self._port = port
@@ -115,6 +134,9 @@ class SSHTransport:
         self._connect_timeout = connect_timeout
         self._host_key_confirmer = host_key_confirmer
         self._key_fetcher = key_fetcher
+        self._print_fn = print_fn
+        self._progress_interval = progress_interval
+        self._now = now
 
         self._client: paramiko.SSHClient | None = None
         self._sftp = None
@@ -210,6 +232,8 @@ class SSHTransport:
         self._require_connected()
         local = Path(local)
         self._mkdir_remote(remote)
+
+        uploads: list[tuple[Path, str]] = []
         for root, dirnames, filenames in os.walk(local):
             root_path = Path(root)
             relative_root = root_path.relative_to(local)
@@ -219,7 +243,49 @@ class SSHTransport:
             for filename in filenames:
                 local_file = root_path / filename
                 remote_file = f"{remote_root}/{filename}" if remote_root else filename
-                self._sftp.put(str(local_file), remote_file)
+                uploads.append((local_file, remote_file))
+
+        total = sum(local_file.stat().st_size for local_file, _ in uploads)
+        self._print_fn(
+            f"Enviando {len(uploads)} arquivo(s) ({format_size(total)})..."
+        )
+        started = self._now()
+        sent = 0
+        for local_file, remote_file in uploads:
+            size = local_file.stat().st_size
+            self._print_fn(f"  {local_file.name} ({format_size(size)})")
+            self._sftp.put(
+                str(local_file),
+                remote_file,
+                callback=self._upload_reporter(sent, total, started),
+            )
+            sent += size
+        elapsed = self._now() - started
+        self._print_fn(
+            f"Envio concluído: {format_size(total)} em {format_duration(elapsed)}."
+        )
+
+    def _upload_reporter(
+        self, already_sent: int, total: int, started: float
+    ) -> Callable[[int, int], None]:
+        """Report the whole transfer, not each file, and not too often."""
+        last_report = self._now()
+
+        def report(transferred: int, _file_total: int) -> None:
+            nonlocal last_report
+            now = self._now()
+            if now - last_report < self._progress_interval:
+                return
+            last_report = now
+            sent = already_sent + transferred
+            elapsed = now - started
+            speed = f", {format_size(sent / elapsed)}/s" if elapsed > 0 else ""
+            percent = 100 * sent // total if total else 100
+            self._print_fn(
+                f"    {percent}% — {format_size(sent)} de {format_size(total)}{speed}"
+            )
+
+        return report
 
     def download_directory(self, remote: str, local: Path) -> None:
         self._require_connected()

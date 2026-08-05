@@ -40,9 +40,12 @@ class FakeSFTPClient:
     def mkdir(self, path):
         self.dirs_created.append(path)
 
-    def put(self, local_path, remote_path):
+    def put(self, local_path, remote_path, callback=None):
         self.uploaded[remote_path] = Path(local_path).read_bytes()
         self.files[remote_path] = self.uploaded[remote_path]
+        if callback is not None:
+            size = len(self.uploaded[remote_path])
+            callback(size, size)
 
     def get(self, remote_path, local_path):
         Path(local_path).write_bytes(self.files[remote_path])
@@ -360,6 +363,52 @@ def test_uploads_bundle_directory(client_factory, tmp_path):
     client = FakeSSHClient.instances[0]
     assert client.sftp.files["/remote/job-42/Dockerfile"] == b"FROM x"
     assert client.sftp.files["/remote/job-42/payload/notebook.ipynb"] == b"{}"
+
+
+def test_upload_reports_size_names_and_completion(client_factory, tmp_path):
+    local = tmp_path / "bundle"
+    local.mkdir()
+    (local / "data.nc").write_bytes(b"x" * 2048)
+    (local / "Dockerfile").write_text("FROM x")
+    printed = []
+
+    transport = make_transport(client_factory, print_fn=printed.append)
+    transport.connect()
+    transport.upload_directory(local, "/remote/job-42")
+
+    assert printed[0] == "Enviando 2 arquivo(s) (2.0 KB)..."
+    assert "  data.nc (2.0 KB)" in printed
+    assert printed[-1].startswith("Envio concluído: 2.0 KB em ")
+
+
+def test_upload_progress_is_reported_at_most_once_per_interval(
+    client_factory, tmp_path
+):
+    """A 500 MB file must not flood the log with a line per chunk."""
+    local = tmp_path / "bundle"
+    local.mkdir()
+    (local / "big.db").write_bytes(b"x" * 4096)
+    printed = []
+    clock = iter([0.0, 0.0, 0.0, 1.0, 6.0, 7.0] + [100.0] * 20)
+
+    transport = make_transport(
+        client_factory,
+        print_fn=printed.append,
+        progress_interval=5.0,
+        now=lambda: next(clock),
+    )
+    transport.connect()
+
+    def chunked_put(local_path, remote_path, callback=None):
+        for step in (1024, 2048, 3072, 4096):
+            callback(step, 4096)
+
+    transport._sftp.put = chunked_put
+    transport.upload_directory(local, "/remote/job-42")
+
+    progress_lines = [line for line in printed if line.startswith("    ")]
+    assert len(progress_lines) == 1
+    assert "%" in progress_lines[0]
 
 
 def test_executes_command_and_returns_result(client_factory):
