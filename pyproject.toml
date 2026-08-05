@@ -15,6 +15,9 @@ dependencies = [
 [project.scripts]
 ovpn-job-submitter = "dgx_slurm.cli:main"
 
+[project.gui-scripts]
+ovpn-job-submitter-gui = "dgx_slurm.gui:main"
+
 [project.optional-dependencies]
 runner = [
     "nbclient>=0.10",

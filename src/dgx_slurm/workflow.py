@@ -9,6 +9,7 @@ import shutil
 import tempfile
 from dataclasses import replace
 from pathlib import Path
+from typing import Callable
 
 from .client import DGXClient
 from .errors import ConfigurationError, NotebookExecutionError
@@ -91,6 +92,7 @@ async def run_notebook_async(
     username: str | None = None,
     output: Path | str | None = None,
     stream: bool = True,
+    password_provider: Callable[[], str] | None = None,
 ) -> JobResult:
     """Submit, wait, download, and return a fully executed notebook.
 
@@ -120,6 +122,11 @@ async def run_notebook_async(
     download_root = notebook.parent / ".dgx-results"
 
     with tempfile.TemporaryDirectory(prefix="dgx-slurm-bundles-") as workdir:
+        client_options = (
+            {"password_provider": password_provider}
+            if password_provider is not None
+            else {}
+        )
         client = DGXClient(
             ovpn=ovpn_path,
             username=cluster_username,
@@ -128,6 +135,7 @@ async def run_notebook_async(
             known_hosts_path=known_hosts if known_hosts.is_file() else None,
             project_root=notebook.parent,
             workdir_root=Path(workdir),
+            **client_options,
         )
         try:
             job = client.submit(

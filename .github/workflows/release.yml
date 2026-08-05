@@ -42,6 +42,7 @@ jobs:
             platform: windows
             architecture: x86_64
             asset: ovpn-job-submitter-windows-x86_64.exe
+            gui_asset: ovpn-job-submitter-windows-x86_64-gui.exe
           - runner: macos-15
             platform: macos
             architecture: arm64
@@ -102,6 +103,15 @@ jobs:
         run: |
           & ".\dist\ovpn-job-submitter.exe" --help
           Move-Item ".\dist\ovpn-job-submitter.exe" ".\dist\${{ matrix.asset }}"
+      - name: Build Windows GUI executable
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          python -m PyInstaller --clean --noconfirm --onefile --windowed `
+            --name ovpn-job-submitter-gui `
+            --additional-hooks-dir pyinstaller-hooks `
+            submit_notebook_gui.py
+          Move-Item ".\dist\ovpn-job-submitter-gui.exe" ".\dist\${{ matrix.gui_asset }}"
       - name: Build and test macOS installer
         if: matrix.platform == 'macos'
         shell: bash
@@ -122,6 +132,13 @@ jobs:
         with:
           name: ${{ matrix.platform }}-${{ matrix.architecture }}
           path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+      - name: Upload Windows GUI executable
+        if: matrix.platform == 'windows'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.platform }}-${{ matrix.architecture }}-gui
+          path: dist/${{ matrix.gui_asset }}
           if-no-files-found: error
 
   release:

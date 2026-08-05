@@ -188,6 +188,37 @@ async def test_high_level_workflow_can_skip_project_files(tmp_path, monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_password_provider_reaches_the_client(tmp_path, monkeypatch):
+    """The GUI has no console, so getpass must be replaceable."""
+    _, notebook, ovpn = make_layout(tmp_path)
+    monkeypatch.setattr("dgx_slurm.workflow.DGXClient", FakeClient)
+    FakeClient.instances.clear()
+    FakeClient.final_state = JobState.COMPLETED
+
+    await run_notebook_async(
+        notebook,
+        **required_job_args(ovpn.parent),
+        password_provider=lambda: "from-the-window",
+    )
+
+    assert FakeClient.instances[-1].kwargs["password_provider"]() == "from-the-window"
+
+
+@pytest.mark.asyncio
+async def test_client_keeps_its_own_password_default_without_provider(
+    tmp_path, monkeypatch
+):
+    _, notebook, ovpn = make_layout(tmp_path)
+    monkeypatch.setattr("dgx_slurm.workflow.DGXClient", FakeClient)
+    FakeClient.instances.clear()
+    FakeClient.final_state = JobState.COMPLETED
+
+    await run_notebook_async(notebook, **required_job_args(ovpn.parent))
+
+    assert "password_provider" not in FakeClient.instances[-1].kwargs
+
+
+@pytest.mark.asyncio
 async def test_high_level_workflow_returns_partial_notebook_then_raises(
     tmp_path, monkeypatch
 ):

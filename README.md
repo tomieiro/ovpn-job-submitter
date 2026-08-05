@@ -9,7 +9,8 @@ executadas.
 Baixe a versão mais recente em
 [GitHub Releases](https://github.com/tomieiro/ovpn-job-submitter/releases/latest):
 
-- **Windows:** `ovpn-job-submitter-windows-x86_64.exe`
+- **Windows (janela):** `ovpn-job-submitter-windows-x86_64-gui.exe`
+- **Windows (linha de comando):** `ovpn-job-submitter-windows-x86_64.exe`
 - **Linux:** `ovpn-job-submitter-linux-x86_64`
 - **Mac Apple Silicon (M1 ou mais recente):**
   `ovpn-job-submitter-macos-arm64.pkg`
@@ -82,6 +83,29 @@ A pasta indicada por `vpn_dir` deve conter exatamente um `.ovpn` e os
 certificados referenciados por ele.
 
 ## 4. Rode o notebook
+
+### Pela janela (Windows)
+
+Clique com o botão direito em `ovpn-job-submitter-windows-x86_64-gui.exe` e
+escolha **Executar como administrador**. A janela pede apenas três coisas:
+
+1. o notebook `.ipynb`;
+2. a pasta da VPN (`.ovpn` + certificados);
+3. a caixa **Enviar também os outros arquivos da pasta do notebook**, que
+   equivale ao `--include-files`.
+
+Ao clicar em **Executar no cluster**, a senha do cluster é pedida uma vez e
+todo o andamento aparece no painel de log da própria janela. Se o programa for
+aberto sem privilégios de administrador, a janela avisa e oferece o botão
+**Reabrir como administrador**.
+
+Os demais valores (partição, GPUs, CPUs, memória, tempo) usam os mesmos padrões
+da linha de comando; para alterá-los, use o executável de terminal.
+
+A partir do repositório, a mesma janela abre com `python -m dgx_slurm.gui`
+(ou `ovpn-job-submitter-gui`, depois do `pip install`).
+
+### Pela linha de comando
 
 No Linux ou macOS:
 
