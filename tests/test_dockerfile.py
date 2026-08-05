@@ -50,6 +50,11 @@ def test_copies_payload(bundle_root):
     assert "COPY payload/ /workspace/" in content
 
 
+def test_silences_the_pip_root_user_warning(bundle_root):
+    content = (bundle_root / "Dockerfile").read_text()
+    assert "ENV PIP_ROOT_USER_ACTION=ignore" in content
+
+
 def test_sets_pythonunbuffered(bundle_root):
     content = (bundle_root / "Dockerfile").read_text()
     assert "ENV PYTHONUNBUFFERED=1" in content

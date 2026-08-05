@@ -45,6 +45,9 @@ echo "=== notebook execution ==="
 docker run \
     --rm \
     --gpus all \
+    --shm-size=1g \
+    --ulimit memlock=-1 \
+    --ulimit stack=67108864 \
     --mount \
     "type=bind,src=${SCRIPT_DIR}/outputs,dst=/workspace/outputs" \
     "${IMAGE_TAG}"

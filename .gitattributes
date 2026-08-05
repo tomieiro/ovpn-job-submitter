@@ -1,4 +1,4 @@
-# Everything under templates/ is shipped to Linux and must keep LF, even on
-# a Windows checkout with core.autocrlf=true.
-src/dgx_slurm/templates/** text eol=lf
-*.slurm text eol=lf
+# Everything here ends up running on Linux -- the bundle templates literally
+# so, since sbatch rejects a script with CRLF. Keep LF in the working tree as
+# well, even on a Windows checkout with core.autocrlf=true.
+* text=auto eol=lf

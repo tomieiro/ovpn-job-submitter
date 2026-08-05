@@ -4,6 +4,10 @@ WORKDIR /workspace
 
 COPY runner/requirements.txt /opt/notebook-runner/requirements.txt
 
+# The container runs as root by design; the warning pip prints about it is
+# noise in the job log, both here and in the notebook's own %pip cells.
+ENV PIP_ROOT_USER_ACTION=ignore
+
 RUN python -m pip install \
         --no-cache-dir \
         --requirement /opt/notebook-runner/requirements.txt

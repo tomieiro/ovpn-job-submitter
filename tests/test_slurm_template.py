@@ -79,6 +79,21 @@ def test_runs_docker_run_with_rm(build):
     assert "--rm" in content
 
 
+def test_gives_the_container_room_for_dataloader_workers(build):
+    """The default 64 MB /dev/shm kills PyTorch workers with a bus error."""
+    bundle_root = build(Resources())
+    content = (bundle_root / "runImage.slurm").read_text()
+    assert "--shm-size=1g" in content
+    assert "--ulimit memlock=-1" in content
+    assert "--ulimit stack=67108864" in content
+
+
+def test_does_not_share_the_host_ipc_namespace(build):
+    """Nodes are shared, so grow /dev/shm instead of opening the host's."""
+    bundle_root = build(Resources())
+    assert "--ipc=host" not in (bundle_root / "runImage.slurm").read_text()
+
+
 def test_mounts_outputs_directory(build):
     bundle_root = build(Resources())
     content = (bundle_root / "runImage.slurm").read_text()
