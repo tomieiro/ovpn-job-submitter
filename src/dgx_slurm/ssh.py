@@ -7,7 +7,10 @@ notebook-supplied text to the remote shell.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import os
+import socket
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +19,8 @@ from typing import Callable
 import paramiko
 
 from .errors import SSHError
+
+DEFAULT_KNOWN_HOSTS = Path.home() / ".ssh" / "known_hosts"
 
 
 @dataclass(frozen=True)
@@ -33,6 +38,54 @@ class RemoteFileChunk:
 
 
 ClientFactory = Callable[[], "paramiko.SSHClient"]
+HostKeyConfirmer = Callable[[str, str], bool]
+
+
+def format_fingerprint(key: paramiko.PKey) -> str:
+    """Render a host key the way OpenSSH shows it when asking for trust."""
+    digest = hashlib.sha256(key.asbytes()).digest()
+    return "SHA256:" + base64.b64encode(digest).decode("ascii").rstrip("=")
+
+
+def fetch_host_key(
+    host: str,
+    port: int,
+    *,
+    timeout: float = 30.0,
+    transport_factory: Callable[..., paramiko.Transport] = paramiko.Transport,
+) -> paramiko.PKey:
+    """Read the key the server presents, without authenticating to it."""
+    try:
+        sock = socket.create_connection((host, port), timeout)
+    except OSError as exc:
+        raise SSHError(f"could not reach {host}:{port} to read its key: {exc}") from exc
+
+    transport = transport_factory(sock)
+    try:
+        transport.start_client(timeout=timeout)
+        key = transport.get_remote_server_key()
+    except paramiko.SSHException as exc:
+        raise SSHError(f"could not read the host key of {host}: {exc}") from exc
+    finally:
+        transport.close()
+    return key
+
+
+def remember_host_key(
+    known_hosts_path: Path | str, host: str, port: int, key: paramiko.PKey
+) -> None:
+    """Append one accepted key, leaving every existing entry untouched."""
+    path = Path(known_hosts_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if os.name == "posix":
+        path.parent.chmod(0o700)
+
+    entry = host if port == 22 else f"[{host}]:{port}"
+    line = f"{entry} {key.get_name()} {key.get_base64()}\n"
+    existing = path.read_text() if path.is_file() else ""
+    separator = "" if not existing or existing.endswith("\n") else "\n"
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(f"{separator}{line}")
 
 
 class SSHTransport:
@@ -49,6 +102,8 @@ class SSHTransport:
         known_hosts_path: Path | str | None = None,
         client_factory: ClientFactory = paramiko.SSHClient,
         connect_timeout: float = 30.0,
+        host_key_confirmer: HostKeyConfirmer | None = None,
+        key_fetcher: Callable[[str, int], paramiko.PKey] = fetch_host_key,
     ) -> None:
         self._host = host
         self._port = port
@@ -58,36 +113,76 @@ class SSHTransport:
         self._known_hosts_path = str(known_hosts_path) if known_hosts_path else None
         self._client_factory = client_factory
         self._connect_timeout = connect_timeout
+        self._host_key_confirmer = host_key_confirmer
+        self._key_fetcher = key_fetcher
 
         self._client: paramiko.SSHClient | None = None
         self._sftp = None
 
     def connect(self) -> None:
+        try:
+            client = self._open_client()
+        except paramiko.SSHException as exc:
+            if not self._may_learn_host_key(exc):
+                raise self._as_ssh_error(exc) from exc
+            self._learn_host_key()
+            try:
+                client = self._open_client()
+            except (paramiko.SSHException, OSError) as retry_exc:
+                raise self._as_ssh_error(retry_exc) from retry_exc
+        except OSError as exc:
+            raise self._as_ssh_error(exc) from exc
+
+        self._client = client
+        self._sftp = client.open_sftp()
+
+    def _open_client(self) -> paramiko.SSHClient:
         client = self._client_factory()
         client.load_system_host_keys()
         if self._known_hosts_path:
             client.load_host_keys(self._known_hosts_path)
         client.set_missing_host_key_policy(paramiko.RejectPolicy())
+        client.connect(
+            hostname=self._host,
+            port=self._port,
+            username=self._username,
+            password=self._password,
+            key_filename=self._key_filename,
+            timeout=self._connect_timeout,
+        )
+        return client
 
-        try:
-            client.connect(
-                hostname=self._host,
-                port=self._port,
-                username=self._username,
-                password=self._password,
-                key_filename=self._key_filename,
-                timeout=self._connect_timeout,
+    def _as_ssh_error(self, exc: Exception) -> SSHError:
+        if isinstance(exc, paramiko.BadHostKeyException):
+            return SSHError(
+                f"SSH connection to {self._host} failed: the key presented by the "
+                "server does not match the one already in known_hosts. Nothing was "
+                "sent; confirm the new identification with the cluster before "
+                "replacing the saved entry."
             )
-        except paramiko.SSHException as exc:
-            raise SSHError(
-                f"SSH connection to {self._host} failed: {exc}"
-                f"{self._known_hosts_hint(exc)}"
-            ) from exc
-        except OSError as exc:
-            raise SSHError(f"SSH connection to {self._host} failed: {exc}") from exc
+        return SSHError(
+            f"SSH connection to {self._host} failed: {exc}"
+            f"{self._known_hosts_hint(exc)}"
+        )
 
-        self._client = client
-        self._sftp = client.open_sftp()
+    def _may_learn_host_key(self, exc: paramiko.SSHException) -> bool:
+        """A key that is merely unknown can be accepted; a changed one cannot."""
+        return (
+            self._host_key_confirmer is not None
+            and not isinstance(exc, paramiko.BadHostKeyException)
+            and "known_hosts" in str(exc)
+        )
+
+    def _learn_host_key(self) -> None:
+        key = self._key_fetcher(self._host, self._port)
+        if not self._host_key_confirmer(self._host, format_fingerprint(key)):
+            raise SSHError(
+                f"the identification of {self._host} was not accepted, so nothing "
+                "was connected or sent."
+            )
+        target = Path(self._known_hosts_path or DEFAULT_KNOWN_HOSTS)
+        remember_host_key(target, self._host, self._port, key)
+        self._known_hosts_path = str(target)
 
     def _known_hosts_hint(self, exc: Exception) -> str:
         """Explain how to trust the server when its key is unknown."""

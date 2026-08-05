@@ -251,6 +251,7 @@ class SubmitterApp:
                     memory=DEFAULT_MEMORY,
                     time_limit=DEFAULT_TIME_LIMIT,
                     password_provider=lambda: password,
+                    host_key_confirmer=self._confirm_host_key,
                 )
         except DGXError as exc:
             self._messages.put(("error", str(exc)))
@@ -259,12 +260,33 @@ class SubmitterApp:
         else:
             self._messages.put(("done", notebook.with_name(f"{notebook.stem}.executed.ipynb")))
 
+    def _confirm_host_key(self, host: str, fingerprint: str) -> bool:
+        """Ask on the GUI thread, from the job thread, and wait for the answer."""
+        answer: queue.Queue[bool] = queue.Queue(maxsize=1)
+        self._messages.put(("confirm", (host, fingerprint, answer)))
+        return answer.get()
+
+    def _ask_host_key(self, host: str, fingerprint: str) -> bool:
+        return bool(
+            messagebox.askyesno(
+                WINDOW_TITLE,
+                f"Primeira conexão com {host}.\n\n"
+                f"Identificação do servidor:\n{fingerprint}\n\n"
+                "Confere com a identificação divulgada pelo cluster? "
+                "Se sim, ela será salva em known_hosts e não será perguntada "
+                "de novo.",
+            )
+        )
+
     def _drain_messages(self) -> None:
         try:
             while True:
                 kind, payload = self._messages.get_nowait()
                 if kind == "log":
                     self._append_log(str(payload))
+                elif kind == "confirm":
+                    host, fingerprint, answer = payload
+                    answer.put(self._ask_host_key(host, fingerprint))
                 elif kind == "done":
                     self._finish("Concluído.")
                     messagebox.showinfo(

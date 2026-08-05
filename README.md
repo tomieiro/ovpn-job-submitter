@@ -58,10 +58,16 @@ Também é possível conectar à VPN da USP manualmente pelo aplicativo gráfico
 Se o servidor SSH já estiver acessível, a biblioteca reutiliza a conexão e não
 a encerra no final.
 
-O servidor precisa estar salvo em `~/.ssh/known_hosts`. Para fazer isso,
-conecte uma vez com `ssh <usuario>@<servidor>` **com a VPN ativa**, confira a
-identificação apresentada e aceite a chave. Enquanto isso não for feito, o
-programa termina com `Server '<servidor>' not found in known_hosts`.
+Na primeira conexão, o programa mostra a identificação do servidor
+(`SHA256:...`) e pergunta se ela confere — em uma caixa de diálogo na janela,
+ou com `[s/N]` no terminal. Ao aceitar, a chave é salva em `~/.ssh/known_hosts`
+e a pergunta não se repete. Confira o valor com a identificação divulgada pelo
+cluster antes de aceitar; se preferir, faça isso antes com
+`ssh <usuario>@<servidor>`, com a VPN ativa.
+
+Se a chave salva mudar depois, o programa recusa a conexão e não envia nada:
+isso pode indicar tanto uma reinstalação do servidor quanto uma tentativa de
+interceptação, e precisa ser confirmado com os administradores.
 
 ## 3. Organize os arquivos
 

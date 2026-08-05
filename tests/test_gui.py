@@ -1,3 +1,4 @@
+import gc
 import sys
 import time
 import tomllib
@@ -20,6 +21,11 @@ def tk_root():
         pytest.skip(f"no display available: {exc}")
     root.withdraw()
     yield root
+    # Drop the app (still held by its pending `after` callback) before the
+    # interpreter goes away, or its Tk variables complain while being freed.
+    for callback_id in root.tk.call("after", "info"):
+        root.after_cancel(str(callback_id))
+    gc.collect()
     root.destroy()
 
 
@@ -170,6 +176,33 @@ def test_window_reports_failures_without_closing(tk_root, layout, monkeypatch):
     assert pump(tk_root, lambda: bool(shown))
     assert "VPN caiu" in shown[-1][1]
     assert app._submit_button.instate(["!disabled"])
+
+
+def test_host_key_question_crosses_from_the_job_thread_to_the_window(
+    tk_root, monkeypatch
+):
+    import threading
+
+    asked = []
+    monkeypatch.setattr(
+        gui.messagebox,
+        "askyesno",
+        lambda _title, message: asked.append(message) or True,
+    )
+    app = gui.SubmitterApp(tk_root, is_elevated=lambda: True)
+    answers = []
+
+    worker = threading.Thread(
+        target=lambda: answers.append(
+            app._confirm_host_key("c4aiscm2", "SHA256:abc")
+        ),
+        daemon=True,
+    )
+    worker.start()
+
+    assert pump(tk_root, lambda: bool(answers))
+    assert answers == [True]
+    assert "SHA256:abc" in asked[0]
 
 
 def test_invalid_selection_never_starts_a_job(tk_root, monkeypatch):

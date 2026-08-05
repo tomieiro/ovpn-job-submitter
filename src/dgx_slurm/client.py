@@ -52,6 +52,7 @@ class DGXClient:
         scheduler: SlurmScheduler | None = None,
         job_store: LocalJobStore | None = None,
         password_provider: Callable[[], str] = getpass.getpass,
+        host_key_confirmer: Callable[[str, str], bool] | None = None,
         workdir_root: Path | None = None,
         project_root: Path | None = None,
         job_name_factory: Callable[[], str] = lambda: f"dgx-notebook-{uuid.uuid4().hex[:8]}",
@@ -68,6 +69,7 @@ class DGXClient:
         self._scheduler = scheduler
         self._job_store = job_store or LocalJobStore(DEFAULT_JOB_STORE_PATH)
         self._password_provider = password_provider
+        self._host_key_confirmer = host_key_confirmer
         self._workdir_root = Path(workdir_root) if workdir_root else Path(tempfile.gettempdir())
         self._project_root = Path(project_root) if project_root else Path.cwd()
         self._job_name_factory = job_name_factory
@@ -164,6 +166,7 @@ class DGXClient:
                 username=self._username,
                 password=self._get_password(),
                 known_hosts_path=self._known_hosts_path,
+                host_key_confirmer=self._host_key_confirmer,
             )
         self._transport.connect()
 

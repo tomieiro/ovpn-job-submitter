@@ -93,6 +93,7 @@ async def run_notebook_async(
     output: Path | str | None = None,
     stream: bool = True,
     password_provider: Callable[[], str] | None = None,
+    host_key_confirmer: Callable[[str, str], bool] | None = None,
 ) -> JobResult:
     """Submit, wait, download, and return a fully executed notebook.
 
@@ -122,11 +123,11 @@ async def run_notebook_async(
     download_root = notebook.parent / ".dgx-results"
 
     with tempfile.TemporaryDirectory(prefix="dgx-slurm-bundles-") as workdir:
-        client_options = (
-            {"password_provider": password_provider}
-            if password_provider is not None
-            else {}
-        )
+        client_options = {}
+        if password_provider is not None:
+            client_options["password_provider"] = password_provider
+        if host_key_confirmer is not None:
+            client_options["host_key_confirmer"] = host_key_confirmer
         client = DGXClient(
             ovpn=ovpn_path,
             username=cluster_username,
