@@ -49,6 +49,7 @@ def make_connection(
     launched,
     exit_code=None,
     connect_timeout=5.0,
+    is_elevated=lambda: True,
 ):
     reachable_iter = iter(reachable_sequence)
 
@@ -73,6 +74,7 @@ def make_connection(
         connect_timeout=connect_timeout,
         poll_interval=0.0,
         sleep=lambda _: None,
+        is_elevated=is_elevated,
     )
 
 
@@ -128,6 +130,7 @@ def test_creates_auth_file_with_mode_0600(ovpn_file):
         connect_timeout=5.0,
         poll_interval=0.0,
         sleep=lambda _: None,
+        is_elevated=lambda: True,
     )
     conn.connect()
     assert captured_auth_file["mode"] == 0o600
@@ -153,6 +156,7 @@ def test_creates_auth_dir_with_mode_0700(ovpn_file):
         connect_timeout=5.0,
         poll_interval=0.0,
         sleep=lambda _: None,
+        is_elevated=lambda: True,
     )
     conn.connect()
     assert captured["mode"] == 0o700
@@ -276,3 +280,40 @@ def test_windows_permission_failure_has_actionable_message(ovpn_file):
     conn._system_name = "Windows"
     with pytest.raises(VPNError, match="Administrator"):
         conn.connect()
+
+
+def test_windows_without_elevation_fails_before_starting_openvpn(ovpn_file):
+    launched = []
+    conn = make_connection(
+        ovpn_file, [False, True], launched, is_elevated=lambda: False
+    )
+    conn._system_name = "Windows"
+    with pytest.raises(VPNError, match="Run as administrator"):
+        conn.connect()
+    assert launched == []
+
+
+def test_windows_elevation_error_mentions_netsh_failure(ovpn_file):
+    conn = make_connection(ovpn_file, [False], [], is_elevated=lambda: False)
+    conn._system_name = "Windows"
+    with pytest.raises(VPNError, match="NETSH"):
+        conn.connect()
+
+
+def test_windows_skips_elevation_check_when_already_reachable(ovpn_file):
+    launched = []
+    conn = make_connection(ovpn_file, [True], launched, is_elevated=lambda: False)
+    conn._system_name = "Windows"
+    conn.connect()
+    assert launched == []
+    assert conn.started_by_us is False
+
+
+def test_other_systems_do_not_require_elevation(ovpn_file):
+    launched = []
+    conn = make_connection(
+        ovpn_file, [False, True], launched, is_elevated=lambda: False
+    )
+    conn._system_name = "Linux"
+    conn.connect()
+    assert launched[0].args[0] == "openvpn"

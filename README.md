@@ -49,15 +49,18 @@ o OpenVPN uma vez:
 
 No Linux e macOS, a biblioteca pede a senha do `sudo` quando precisa abrir a
 VPN. No Windows, abra o PowerShell ou Terminal com **Executar como
-administrador** antes de rodar o script.
+administrador** antes de rodar o script. Sem isso, o OpenVPN não consegue
+configurar o adaptador e fica repetindo
+`NETSH: ... ERROR: command failed: returned error code 1`.
 
 Também é possível conectar à VPN da USP manualmente pelo aplicativo gráfico.
 Se o servidor SSH já estiver acessível, a biblioteca reutiliza a conexão e não
 a encerra no final.
 
 O servidor precisa estar salvo em `~/.ssh/known_hosts`. Para fazer isso,
-conecte uma vez com `ssh <usuario>@<servidor>`, confira a identificação
-apresentada e aceite a chave.
+conecte uma vez com `ssh <usuario>@<servidor>` **com a VPN ativa**, confira a
+identificação apresentada e aceite a chave. Enquanto isso não for feito, o
+programa termina com `Server '<servidor>' not found in known_hosts`.
 
 ## 3. Organize os arquivos
 

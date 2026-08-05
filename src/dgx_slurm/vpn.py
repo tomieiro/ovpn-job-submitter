@@ -27,6 +27,29 @@ OPENVPN_LINUX_DOWNLOAD = (
 )
 OPENVPN_MACOS_DOWNLOAD = "https://formulae.brew.sh/formula/openvpn"
 
+WINDOWS_ELEVATION_HINT = (
+    "OpenVPN needs Administrator rights on Windows to assign the VPN "
+    "adapter address; without them it loops on "
+    "'NETSH: ... ERROR: command failed: returned error code 1' and the "
+    "cluster never becomes reachable. Reopen PowerShell or Terminal with "
+    "'Run as administrator', or connect through OpenVPN GUI before running "
+    "the script."
+)
+
+
+def windows_process_is_elevated() -> bool:
+    """Return whether the current Windows process holds an elevated token.
+
+    When the answer cannot be determined the process is assumed to be
+    elevated, so OpenVPN itself decides instead of this check.
+    """
+    try:
+        import ctypes
+
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except (AttributeError, OSError):
+        return True
+
 
 def discover_openvpn_binary(
     system_name: str | None = None,
@@ -104,6 +127,7 @@ class VPNConnection:
         poll_interval: float = 0.5,
         sleep: Callable[[float], None] = time.sleep,
         now: Callable[[], float] = time.monotonic,
+        is_elevated: Callable[[], bool] = windows_process_is_elevated,
     ) -> None:
         self._ovpn_path = Path(ovpn_path)
         self._username = username
@@ -118,6 +142,7 @@ class VPNConnection:
         self._poll_interval = poll_interval
         self._sleep = sleep
         self._now = now
+        self._is_elevated = is_elevated
 
         self._process: subprocess.Popen | None = None
         self._started_by_us = False
@@ -131,6 +156,9 @@ class VPNConnection:
         if self._is_reachable():
             self._started_by_us = False
             return
+
+        if self._system_name == "Windows" and not self._is_elevated():
+            raise VPNError(WINDOWS_ELEVATION_HINT)
 
         openvpn_binary = self._openvpn_binary or discover_openvpn_binary(
             self._system_name
