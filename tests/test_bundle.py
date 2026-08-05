@@ -41,6 +41,56 @@ def test_accepts_valid_notebook(builder, project, tmp_path):
     assert (bundle_root / "payload" / "notebook.ipynb").exists()
 
 
+BUNDLE_TEXT_FILES = (
+    "runImage.slurm",
+    "Dockerfile",
+    ".dockerignore",
+    "manifest.json",
+    "runner/execute_notebook.py",
+    "runner/requirements.txt",
+)
+
+
+def test_bundle_text_files_never_carry_windows_line_breaks(
+    builder, project, tmp_path
+):
+    """sbatch refuses a script with CRLF, and write_text emits it on Windows."""
+    nb_path = make_notebook(project / "experiment.ipynb")
+    bundle_root = builder.build(
+        notebook=nb_path,
+        job_name="dgx-notebook",
+        resources=Resources(),
+        workdir=tmp_path / "bundle",
+        project_root=project,
+    )
+    for name in BUNDLE_TEXT_FILES:
+        assert b"\r" not in (bundle_root / name).read_bytes(), name
+
+
+def test_crlf_templates_are_normalised_on_the_way_into_the_bundle(
+    project, tmp_path
+):
+    """A Windows checkout of the repository stores the templates as CRLF."""
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    source = NotebookBundleBuilder()._templates_dir
+    for template in source.iterdir():
+        if template.is_file():
+            crlf = template.read_text(encoding="utf-8").replace("\n", "\r\n")
+            (templates / template.name).write_bytes(crlf.encode("utf-8"))
+
+    nb_path = make_notebook(project / "experiment.ipynb")
+    bundle_root = NotebookBundleBuilder(templates_dir=templates).build(
+        notebook=nb_path,
+        job_name="dgx-notebook",
+        resources=Resources(),
+        workdir=tmp_path / "bundle",
+        project_root=project,
+    )
+    for name in BUNDLE_TEXT_FILES:
+        assert b"\r" not in (bundle_root / name).read_bytes(), name
+
+
 def test_rejects_nonexistent_notebook(builder, project, tmp_path):
     with pytest.raises(BundleError):
         builder.build(

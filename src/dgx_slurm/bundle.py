@@ -62,21 +62,24 @@ class NotebookBundleBuilder:
         for include_path in include:
             self._copy_include(Path(include_path), project_root, payload_dir)
 
-        shutil.copyfile(
+        self._copy_unix_text(
             self._templates_dir / "execute_notebook.py",
             runner_dir / "execute_notebook.py",
         )
-        shutil.copyfile(
+        self._copy_unix_text(
             self._templates_dir / "runner-requirements.txt",
             runner_dir / "requirements.txt",
         )
-        shutil.copyfile(self._templates_dir / "Dockerfile", bundle_root / "Dockerfile")
-        shutil.copyfile(
+        self._copy_unix_text(
+            self._templates_dir / "Dockerfile", bundle_root / "Dockerfile"
+        )
+        self._copy_unix_text(
             self._templates_dir / "dockerignore", bundle_root / ".dockerignore"
         )
 
-        (bundle_root / "runImage.slurm").write_text(
-            self._render_slurm_script(job_name, resources)
+        self._write_unix_text(
+            bundle_root / "runImage.slurm",
+            self._render_slurm_script(job_name, resources),
         )
 
         manifest = {
@@ -85,9 +88,22 @@ class NotebookBundleBuilder:
             "resources": asdict(resources),
             "include": [str(Path(p).relative_to(project_root)) for p in include],
         }
-        (bundle_root / "manifest.json").write_text(json.dumps(manifest, indent=2))
+        self._write_unix_text(
+            bundle_root / "manifest.json", json.dumps(manifest, indent=2)
+        )
 
         return bundle_root
+
+    @staticmethod
+    def _write_unix_text(destination: Path, text: str) -> None:
+        """The bundle runs on Linux: sbatch rejects a script with CRLF, and
+        Path.write_text would produce exactly that on Windows."""
+        destination.write_text(text, encoding="utf-8", newline="\n")
+
+    @classmethod
+    def _copy_unix_text(cls, source: Path, destination: Path) -> None:
+        """Copy a template as text, so a CRLF checkout cannot travel with it."""
+        cls._write_unix_text(destination, Path(source).read_text(encoding="utf-8"))
 
     def _validate_notebook(self, notebook: Path) -> None:
         if notebook.suffix != ".ipynb":

@@ -1,0 +1,4 @@
+# Everything under templates/ is shipped to Linux and must keep LF, even on
+# a Windows checkout with core.autocrlf=true.
+src/dgx_slurm/templates/** text eol=lf
+*.slurm text eol=lf
