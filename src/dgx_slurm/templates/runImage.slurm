@@ -35,7 +35,7 @@ echo "=== job: ${SLURM_JOB_ID} ==="
 echo "=== docker build: ${IMAGE_TAG} ==="
 
 docker build \
-    --quiet \
+    --progress=plain \
     -t "${IMAGE_TAG}" \
     -f "${DOCKERFILE}" \
     "${SCRIPT_DIR}"
