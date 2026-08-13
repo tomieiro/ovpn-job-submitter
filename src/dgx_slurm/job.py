@@ -96,6 +96,39 @@ class DGXJob:
             output_files=output_files,
         )
 
+    def collect_available(
+        self,
+        status: JobStatus,
+        *,
+        destination: Path | str,
+        stream: bool = True,
+    ) -> JobResult:
+        """Download a finished job when SLURM no longer reports its state."""
+        streamer = LogStreamer(
+            self._transport,
+            stdout_path=self._remote_stdout_path(),
+            stderr_path=self._remote_stderr_path(),
+            print_fn=self._print_fn,
+        )
+        streamer.poll(echo=stream)
+        downloaded = self.download_outputs(destination)
+        executed_notebook = next(
+            (path for path in downloaded if path.name == "notebook.executed.ipynb"),
+            None,
+        )
+        return JobResult(
+            job_id=self._job_id,
+            state=status.state,
+            exit_code=status.exit_code,
+            stdout=streamer.stdout,
+            stderr=streamer.stderr,
+            executed_notebook=executed_notebook,
+            output_files=tuple(
+                path for path in downloaded
+                if path.name != "notebook.executed.ipynb"
+            ),
+        )
+
     def cancel(self) -> None:
         self._scheduler.cancel(self._job_id)
 

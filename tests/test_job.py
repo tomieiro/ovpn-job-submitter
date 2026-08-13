@@ -155,3 +155,15 @@ def test_download_outputs_method(tmp_path):
     assert (tmp_path / "dl" / "notebook.executed.ipynb") in files or (
         tmp_path / "dl" / "notebook.executed.ipynb"
     ).exists()
+
+
+def test_collect_available_downloads_when_status_is_unknown(tmp_path):
+    transport = FakeTransport()
+    job, _, _ = make_job([JobState.UNKNOWN], transport=transport)
+    status = job.status()
+
+    result = job.collect_available(status, destination=tmp_path / "recovered")
+
+    assert result.state is JobState.UNKNOWN
+    assert result.executed_notebook == tmp_path / "recovered" / "notebook.executed.ipynb"
+    assert tmp_path / "recovered" / "result.txt" in result.output_files

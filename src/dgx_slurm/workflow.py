@@ -232,17 +232,27 @@ async def collect_results_async(
     try:
         job = client.attach(job_id)
         status = job.status()
-        if not status.state.is_terminal():
+        if status.state in {JobState.PENDING, JobState.RUNNING}:
             raise SubmissionError(
                 f"job {job_id} is {status.state.value}; try collecting again later"
             )
         notebook = Path(record["notebook"])
         output_path = Path(record["output"])
-        result = await job.wait(
-            stream=True,
-            download_outputs=True,
-            destination=notebook.parent / ".dgx-results" / job_id,
-        )
+        destination = notebook.parent / ".dgx-results" / job_id
+        if status.state is JobState.UNKNOWN:
+            print(
+                f"Job {job_id} is no longer available in SLURM accounting; "
+                "collecting its remote outputs directly."
+            )
+            result = job.collect_available(
+                status, destination=destination, stream=True
+            )
+        else:
+            result = await job.wait(
+                stream=True,
+                download_outputs=True,
+                destination=destination,
+            )
     finally:
         client.close()
 
