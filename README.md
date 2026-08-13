@@ -165,6 +165,25 @@ O notebook e a pasta da VPN são obrigatórios. Os demais valores são opcionais
 
 Consulte todas as opções com `ovpn-job-submitter --help`.
 
+Para submeter sem manter a VPN e o terminal abertos durante todo o job, use:
+
+```bash
+ovpn-job-submitter project/experimento.ipynb SSH --include-files --async
+```
+
+O comando imprime o ID do SLURM e encerra assim que a submissão é aceita. Após
+o job terminar, reconecte apenas para baixar os resultados:
+
+```bash
+ovpn-job-submitter --collect-results 48192
+```
+
+A coleta deve ser feita na mesma máquina e pelo mesmo usuário que submeteu o
+job, pois os dados não sensíveis necessários para reencontrar seu diretório
+remoto ficam registrados em `~/.dgx-slurm/jobs.json`. Senhas e credenciais da
+VPN não são armazenadas. Se o job ainda estiver ativo, a coleta informa seu
+estado e encerra; basta repetir o comando mais tarde.
+
 Durante a execução, o programa:
 
 1. valida o `.ovpn` e identifica o usuário pelo certificado;

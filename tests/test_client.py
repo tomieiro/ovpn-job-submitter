@@ -201,6 +201,15 @@ def test_submit_returns_dgx_job(project, tmp_path, client_parts):
     assert job.id == "48192"
 
 
+def test_submit_persists_collection_metadata(project, tmp_path, client_parts):
+    *_, store = client_parts
+    client = make_client(project, tmp_path, client_parts)
+    nb = make_notebook(project / "experiment.ipynb")
+    client.submit(nb, resources=Resources(), metadata={"vpn_dir": "/vpn"})
+
+    assert store.load("48192")["vpn_dir"] == "/vpn"
+
+
 def test_attach_recovers_existing_job(project, tmp_path, client_parts):
     calls, vpn, transport, scheduler, store = client_parts
     store.save("48192", {"job_name": "dgx-notebook-abc", "remote_job_dir": "dgx-slurm-jobs/dgx-notebook-abc"})

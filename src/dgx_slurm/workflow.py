@@ -12,8 +12,10 @@ from pathlib import Path
 from typing import Callable
 
 from .client import DGXClient
-from .errors import ConfigurationError, NotebookExecutionError
+from .errors import ConfigurationError, NotebookExecutionError, SubmissionError
 from .models import JobResult, JobState, Resources
+from .storage import LocalJobStore
+from .client import DEFAULT_JOB_STORE_PATH
 
 _IGNORED_PROJECT_NAMES = {
     ".dgx-results",
@@ -92,9 +94,10 @@ async def run_notebook_async(
     username: str | None = None,
     output: Path | str | None = None,
     stream: bool = True,
+    detach: bool = False,
     password_provider: Callable[[], str] | None = None,
     host_key_confirmer: Callable[[str, str], bool] | None = None,
-) -> JobResult:
+) -> JobResult | str:
     """Submit, wait, download, and return a fully executed notebook.
 
     The VPN directory, SSH endpoint, and SLURM allocation are always explicit.
@@ -149,8 +152,18 @@ async def run_notebook_async(
                     time_limit=time_limit,
                     partition=partition,
                 ),
+                metadata={
+                    "notebook": str(notebook),
+                    "output": str(output_path),
+                    "vpn_dir": str(Path(vpn_dir).expanduser().resolve()),
+                    "ssh_host": ssh_host,
+                    "ssh_port": ssh_port,
+                    "username": cluster_username,
+                },
             )
             print(f"Job submetido: {job.id}")
+            if detach:
+                return job.id
             result = await job.wait(
                 stream=stream,
                 download_outputs=True,
@@ -176,6 +189,69 @@ async def run_notebook_async(
             f"job {result.job_id} ended as {result.state.value} "
             f"(exit code {result.exit_code}).{partial}"
         )
+    return result
+
+
+async def collect_results_async(
+    job_id: str,
+    *,
+    password_provider: Callable[[], str] | None = None,
+    host_key_confirmer: Callable[[str, str], bool] | None = None,
+) -> JobResult:
+    """Reconnect once a detached job has finished and download its outputs."""
+    if not job_id.isdigit():
+        raise ConfigurationError(f"job id must be numeric, got {job_id!r}")
+
+    store = LocalJobStore(DEFAULT_JOB_STORE_PATH)
+    record = store.load(job_id)
+    if record is None:
+        raise SubmissionError(f"no local record found for job {job_id}")
+    required = {"vpn_dir", "ssh_host", "ssh_port", "notebook", "output"}
+    missing = sorted(required.difference(record))
+    if missing:
+        raise SubmissionError(
+            f"job {job_id} predates asynchronous collection metadata; "
+            f"missing: {', '.join(missing)}"
+        )
+
+    ovpn_path = discover_ovpn(record["vpn_dir"])
+    known_hosts = Path.home() / ".ssh" / "known_hosts"
+    client_options = {}
+    if password_provider is not None:
+        client_options["password_provider"] = password_provider
+    if host_key_confirmer is not None:
+        client_options["host_key_confirmer"] = host_key_confirmer
+    client = DGXClient(
+        ovpn=ovpn_path,
+        username=discover_username(ovpn_path),
+        ssh_host=record["ssh_host"],
+        ssh_port=int(record["ssh_port"]),
+        known_hosts_path=known_hosts if known_hosts.is_file() else None,
+        **client_options,
+    )
+    try:
+        job = client.attach(job_id)
+        status = job.status()
+        if not status.state.is_terminal():
+            raise SubmissionError(
+                f"job {job_id} is {status.state.value}; try collecting again later"
+            )
+        notebook = Path(record["notebook"])
+        output_path = Path(record["output"])
+        result = await job.wait(
+            stream=True,
+            download_outputs=True,
+            destination=notebook.parent / ".dgx-results" / job_id,
+        )
+    finally:
+        client.close()
+
+    if result.executed_notebook is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(result.executed_notebook, output_path)
+        result = replace(result, executed_notebook=output_path)
+        print(f"Notebook executado: {output_path}")
+    print(f"Estado final: {result.state.value} (exit code: {result.exit_code})")
     return result
 
 
@@ -209,3 +285,8 @@ def run_notebook(
             **kwargs,
         )
     )
+
+
+def collect_results(job_id: str, **kwargs) -> JobResult:
+    """Synchronous wrapper around :func:`collect_results_async`."""
+    return asyncio.run(collect_results_async(job_id, **kwargs))

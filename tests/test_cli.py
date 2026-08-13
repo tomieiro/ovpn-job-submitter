@@ -32,6 +32,7 @@ def test_cli_passes_required_paths_and_defaults():
         "cpus": DEFAULT_CPUS,
         "memory": DEFAULT_MEMORY,
         "time_limit": DEFAULT_TIME_LIMIT,
+        "detach": False,
     }
 
 
@@ -77,7 +78,29 @@ def test_cli_include_files_and_optional_overrides():
         "cpus": 16,
         "memory": "128G",
         "time_limit": "02:30:00",
+        "detach": False,
     }
+
+
+def test_cli_async_detaches_after_submission():
+    calls = []
+
+    def runner(notebook, **kwargs):
+        calls.append((notebook, kwargs))
+
+    assert main(["experiment.ipynb", "vpn", "--async"], runner=runner) == 0
+    assert calls[0][1]["detach"] is True
+
+
+def test_cli_collects_by_id_without_submission_paths():
+    calls = []
+
+    def collector(job_id, **kwargs):
+        calls.append((job_id, kwargs))
+
+    assert main(["--collect-results", "48192"], collector=collector) == 0
+    assert calls[0][0] == "48192"
+    assert calls[0][1]["host_key_confirmer"] is confirm_host_key
 
 
 def test_cli_host_key_prompt_accepts_only_an_explicit_yes(monkeypatch, capsys):

@@ -8,7 +8,7 @@ from collections.abc import Callable, Sequence
 
 from .errors import DGXError
 from .models import JobResult
-from .workflow import run_notebook
+from .workflow import collect_results, run_notebook
 
 DEFAULT_SSH_HOST = "c4aiscm2"
 DEFAULT_SSH_PORT = 22
@@ -19,6 +19,7 @@ DEFAULT_MEMORY = "0"
 DEFAULT_TIME_LIMIT = "04:00:00"
 
 NotebookRunner = Callable[..., JobResult]
+ResultCollector = Callable[..., JobResult]
 
 
 def confirm_host_key(host: str, fingerprint: str) -> bool:
@@ -40,9 +41,9 @@ def build_parser() -> argparse.ArgumentParser:
             "Executa um notebook no cluster C4AI e baixa o .ipynb executado."
         ),
     )
-    parser.add_argument("notebook", help="caminho do arquivo .ipynb")
+    parser.add_argument("notebook", nargs="?", help="caminho do arquivo .ipynb")
     parser.add_argument(
-        "vpn_dir",
+        "vpn_dir", nargs="?",
         help="pasta que contém o .ovpn e seus certificados",
     )
     parser.add_argument(
@@ -57,6 +58,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cpus", type=int, default=DEFAULT_CPUS)
     parser.add_argument("--memory", default=DEFAULT_MEMORY)
     parser.add_argument("--time-limit", default=DEFAULT_TIME_LIMIT)
+    parser.add_argument(
+        "--async", dest="detach", action="store_true",
+        help="submete o job, imprime seu ID e sai sem aguardar",
+    )
+    parser.add_argument(
+        "--collect-results", metavar="ID",
+        help="baixa os resultados de um job assíncrono já encerrado",
+    )
     return parser
 
 
@@ -64,9 +73,22 @@ def main(
     argv: Sequence[str] | None = None,
     *,
     runner: NotebookRunner = run_notebook,
+    collector: ResultCollector = collect_results,
 ) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.collect_results:
+            if args.notebook is not None or args.vpn_dir is not None:
+                raise ConfigurationError(
+                    "positional arguments must not be supplied with --collect-results"
+                )
+            collector(
+                args.collect_results,
+                host_key_confirmer=confirm_host_key,
+            )
+            return 0
+        if args.notebook is None or args.vpn_dir is None:
+            raise ConfigurationError("notebook and vpn_dir are required")
         runner(
             args.notebook,
             include_project_files=args.include_files,
@@ -78,6 +100,7 @@ def main(
             cpus=args.cpus,
             memory=args.memory,
             time_limit=args.time_limit,
+            detach=args.detach,
             host_key_confirmer=confirm_host_key,
         )
     except DGXError as exc:

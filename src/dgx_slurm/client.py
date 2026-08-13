@@ -85,6 +85,7 @@ class DGXClient:
         *,
         resources: Resources | None = None,
         include: Sequence[Path | str] = (),
+        metadata: dict | None = None,
     ) -> DGXJob:
         resources = resources or Resources()
         notebook = Path(notebook)
@@ -113,9 +114,10 @@ class DGXClient:
         self._print_fn("Submetendo ao SLURM...")
         job_id = self._scheduler.submit(remote_job_dir)
 
-        self._job_store.save(
-            job_id, {"job_name": job_name, "remote_job_dir": remote_job_dir}
-        )
+        record = {"job_name": job_name, "remote_job_dir": remote_job_dir}
+        if metadata:
+            record.update(metadata)
+        self._job_store.save(job_id, record)
 
         return DGXJob(
             job_id=job_id,

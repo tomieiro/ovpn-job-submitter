@@ -130,9 +130,10 @@ class FakeClient:
         self.job = FakeJob(self.final_state)
         self.instances.append(self)
 
-    def submit(self, _notebook, *, include, resources):
+    def submit(self, _notebook, *, include, resources, metadata=None):
         self.job.include = include
         self.job.resources = resources
+        self.job.metadata = metadata
         return self.job
 
     def close(self):
@@ -167,9 +168,26 @@ async def test_high_level_workflow_owns_connection_bundle_and_result(
         time_limit="04:00:00",
         partition="devwork",
     )
+    assert client.job.metadata["notebook"] == str(notebook)
     assert client.closed is True
     assert result.executed_notebook == project / "experiment.executed.ipynb"
     assert result.executed_notebook.exists()
+
+
+@pytest.mark.asyncio
+async def test_async_workflow_submits_without_waiting(tmp_path, monkeypatch):
+    _, notebook, ovpn = make_layout(tmp_path)
+    monkeypatch.setattr("dgx_slurm.workflow.DGXClient", FakeClient)
+    FakeClient.instances.clear()
+
+    job_id = await run_notebook_async(
+        notebook,
+        **required_job_args(ovpn.parent),
+        detach=True,
+    )
+
+    assert job_id == "48192"
+    assert FakeClient.instances[-1].closed is True
 
 
 @pytest.mark.asyncio
