@@ -127,6 +127,39 @@ class DGXClient:
             transport=self._transport,
         )
 
+    def prune_remote_jobs(
+        self, *, keep: int, protect: str | None = None
+    ) -> list[str]:
+        """Remove os diretorios de job mais antigos, preservando os ``keep`` recentes.
+
+        O ``runImage.slurm`` ja apaga o payload ao terminar, mas logs, outputs e
+        manifesto ficam -- e precisam ficar, porque uma coleta com ``--async``
+        acontece depois. Sem poda, um diretorio por submissao se acumula
+        indefinidamente no home do cluster.
+
+        Nunca remove ``protect``: coletar um job antigo nao pode apagar o
+        proprio job que se acabou de baixar. Opera exclusivamente dentro de
+        :data:`DEFAULT_REMOTE_BASE_DIR`; nada fora dele e tocado.
+        """
+        if keep < 0:
+            raise ValueError("keep must not be negative")
+        base = DEFAULT_REMOTE_BASE_DIR
+        listing = self._transport.execute(
+            f"ls -1dt {shlex.quote(base)}/*/ 2>/dev/null || true"
+        )
+        nomes = [
+            linha.strip().rstrip("/").split("/")[-1]
+            for linha in listing.stdout.splitlines()
+            if linha.strip()
+        ]
+        if protect is not None and protect in nomes:
+            nomes.remove(protect)
+        antigos = nomes[keep:]
+        for nome in antigos:
+            alvo = f"{base}/{nome}"
+            self._transport.execute(f"rm -rf {shlex.quote(alvo)}")
+        return antigos
+
     def attach(self, job_id: str) -> DGXJob:
         record = self._job_store.load(job_id)
         if record is None:

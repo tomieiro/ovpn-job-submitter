@@ -245,3 +245,62 @@ def test_close_disconnects_own_resources(project, tmp_path, client_parts):
     client.close()
     assert vpn.disconnect_calls == 1
     assert transport.close_calls == 1
+
+
+class _TransporteFalso:
+    """Transporte minimo que registra comandos e devolve uma listagem fixa."""
+
+    def __init__(self, listagem):
+        self.listagem = listagem
+        self.comandos = []
+
+    def execute(self, command):
+        self.comandos.append(command)
+
+        class _R:
+            stdout = ""
+
+        if command.startswith("ls -1dt"):
+            _R.stdout = self.listagem
+        return _R
+
+
+def _cliente_com(transporte):
+    from dgx_slurm.client import DGXClient
+
+    cliente = DGXClient.__new__(DGXClient)
+    cliente._transport = transporte
+    return cliente
+
+
+def test_prune_remote_jobs_keeps_the_most_recent_and_removes_the_rest():
+    transporte = _TransporteFalso(
+        "dgx-slurm-jobs/j5/\ndgx-slurm-jobs/j4/\ndgx-slurm-jobs/j3/\n"
+        "dgx-slurm-jobs/j2/\ndgx-slurm-jobs/j1/\n"
+    )
+    removidos = _cliente_com(transporte).prune_remote_jobs(keep=3)
+
+    assert removidos == ["j2", "j1"]
+    remocoes = [c for c in transporte.comandos if c.startswith("rm -rf")]
+    assert remocoes == ["rm -rf dgx-slurm-jobs/j2", "rm -rf dgx-slurm-jobs/j1"]
+
+
+def test_prune_remote_jobs_never_removes_the_job_just_collected():
+    """Coletar um job antigo nao pode apagar o proprio job que se baixou."""
+    transporte = _TransporteFalso(
+        "dgx-slurm-jobs/j5/\ndgx-slurm-jobs/j4/\ndgx-slurm-jobs/j3/\n"
+        "dgx-slurm-jobs/j2/\ndgx-slurm-jobs/j1/\n"
+    )
+    removidos = _cliente_com(transporte).prune_remote_jobs(keep=2, protect="j1")
+
+    assert "j1" not in removidos
+    assert removidos == ["j3", "j2"]
+
+
+def test_prune_remote_jobs_touches_nothing_outside_the_base_directory():
+    transporte = _TransporteFalso("dgx-slurm-jobs/j2/\ndgx-slurm-jobs/j1/\n")
+    _cliente_com(transporte).prune_remote_jobs(keep=0)
+
+    for comando in transporte.comandos:
+        if comando.startswith("rm -rf"):
+            assert comando.startswith("rm -rf dgx-slurm-jobs/")

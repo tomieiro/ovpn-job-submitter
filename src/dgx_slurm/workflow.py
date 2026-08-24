@@ -224,6 +224,7 @@ async def collect_results_async(
     password_provider: Callable[[], str] | None = None,
     host_key_confirmer: Callable[[str, str], bool] | None = None,
     save_logs: bool = False,
+    keep_remote: int = 4,
 ) -> JobResult:
     """Reconnect once a detached job has finished and download its outputs."""
     if not job_id.isdigit():
@@ -280,6 +281,17 @@ async def collect_results_async(
                 download_outputs=True,
                 destination=destination,
             )
+        if keep_remote > 0:
+            removidos = client.prune_remote_jobs(
+                keep=keep_remote, protect=record.get("job_name")
+            )
+            if removidos:
+                print(
+                    f"Removidos {len(removidos)} diretorios antigos no cluster "
+                    f"(mantidos os {keep_remote} mais recentes):"
+                )
+                for nome in removidos:
+                    print(f"  {nome}")
     finally:
         client.close()
 

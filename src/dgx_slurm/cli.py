@@ -73,6 +73,13 @@ def build_parser() -> argparse.ArgumentParser:
             "resultados, mesmo quando o job falhou e outputs/ ficou vazio"
         ),
     )
+    parser.add_argument(
+        "--keep-remote", type=int, default=4, metavar="N",
+        help=(
+            "após coletar, remove do cluster os diretórios de job mais antigos, "
+            "preservando os N mais recentes (padrão 4; use 0 para não remover nada)"
+        ),
+    )
     return parser
 
 
@@ -93,6 +100,7 @@ def main(
                 args.collect_results,
                 host_key_confirmer=confirm_host_key,
                 save_logs=args.collect_even_error,
+                keep_remote=args.keep_remote,
             )
             return 0
         if args.notebook is None or args.vpn_dir is None:
