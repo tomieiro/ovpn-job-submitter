@@ -66,6 +66,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--collect-results", metavar="ID",
         help="baixa os resultados de um job assíncrono já encerrado",
     )
+    parser.add_argument(
+        "--collect-even-error", action="store_true",
+        help=(
+            "grava stdout e stderr do job em job.out e job.err junto dos "
+            "resultados, mesmo quando o job falhou e outputs/ ficou vazio"
+        ),
+    )
     return parser
 
 
@@ -85,6 +92,7 @@ def main(
             collector(
                 args.collect_results,
                 host_key_confirmer=confirm_host_key,
+                save_logs=args.collect_even_error,
             )
             return 0
         if args.notebook is None or args.vpn_dir is None:

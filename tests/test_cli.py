@@ -101,6 +101,37 @@ def test_cli_collects_by_id_without_submission_paths():
     assert main(["--collect-results", "48192"], collector=collector) == 0
     assert calls[0][0] == "48192"
     assert calls[0][1]["host_key_confirmer"] is confirm_host_key
+    assert calls[0][1]["save_logs"] is False
+
+
+def test_cli_collect_even_error_requests_log_persistence():
+    calls = []
+
+    def collector(job_id, **kwargs):
+        calls.append((job_id, kwargs))
+
+    assert main(
+        ["--collect-results", "48192", "--collect-even-error"],
+        collector=collector,
+    ) == 0
+    assert calls[0][1]["save_logs"] is True
+
+
+def test_save_logs_writes_stdout_and_stderr_even_when_empty(tmp_path):
+    from dgx_slurm.models import JobResult, JobState
+    from dgx_slurm.workflow import _save_logs
+
+    # Um job que morre antes de escrever em outputs/ e o caso que motiva a
+    # flag: outputs vazio, e o log e a unica evidencia.
+    result = JobResult(
+        job_id="48192", state=JobState.FAILED, exit_code=1,
+        stdout="docker build falhou\n", stderr="", executed_notebook=None,
+    )
+    saved = _save_logs(result, tmp_path)
+
+    assert {p.name for p in saved} == {"job.out", "job.err"}
+    assert (tmp_path / "job.out").read_text() == "docker build falhou\n"
+    assert (tmp_path / "job.err").read_text() == ""
 
 
 def test_cli_host_key_prompt_accepts_only_an_explicit_yes(monkeypatch, capsys):

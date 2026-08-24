@@ -192,11 +192,38 @@ async def run_notebook_async(
     return result
 
 
+def _save_logs(result: JobResult, destination: Path) -> tuple[Path, ...]:
+    """Write the job's streamed stdout and stderr next to its outputs.
+
+    ``download_outputs`` only fetches ``outputs/``. A job that dies before
+    producing any output therefore yields an empty results directory, and the
+    log -- which is the only diagnostic there is -- exists solely on the console
+    and vanishes when the VPN drops right after collection. For a failed job the
+    log IS the artefact, so persist it.
+    """
+    destination.mkdir(parents=True, exist_ok=True)
+    saved: list[Path] = []
+    for text, name in ((result.stdout, "job.out"), (result.stderr, "job.err")):
+        path = destination / name
+        path.write_text(text or "", encoding="utf-8")
+        saved.append(path)
+        size = len(text or "")
+        print(f"Log salvo: {path} ({size} bytes)")
+        if size == 0:
+            print(
+                f"  aviso: {name} veio vazio -- o job pode ter morrido antes de "
+                "o SLURM materializar o arquivo, ou o caminho remoto de log "
+                "difere do esperado"
+            )
+    return tuple(saved)
+
+
 async def collect_results_async(
     job_id: str,
     *,
     password_provider: Callable[[], str] | None = None,
     host_key_confirmer: Callable[[str, str], bool] | None = None,
+    save_logs: bool = False,
 ) -> JobResult:
     """Reconnect once a detached job has finished and download its outputs."""
     if not job_id.isdigit():
@@ -255,6 +282,9 @@ async def collect_results_async(
             )
     finally:
         client.close()
+
+    if save_logs:
+        _save_logs(result, destination)
 
     if result.executed_notebook is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
