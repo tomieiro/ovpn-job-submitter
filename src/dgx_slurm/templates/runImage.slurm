@@ -40,11 +40,28 @@ docker build \
     -f "${DOCKERFILE}" \
     "${SCRIPT_DIR}"
 
+# O SLURM ja restringe as GPUs do job, expondo os indices alocados em
+# CUDA_VISIBLE_DEVICES (ou SLURM_JOB_GPUS, conforme a versao). `--gpus all`
+# ignora isso e entrega TODAS as GPUs do no ao container: um job que pede 4
+# enxerga 8 e pode, por engano, usar placas alocadas a outro usuario. Repassar
+# a lista mantem o container dentro da alocacao.
+#
+# Usa array em vez de eval: o caminho do job entra em --mount e um eval
+# quebraria se ele contivesse espacos.
+GPU_IDS="${CUDA_VISIBLE_DEVICES:-${SLURM_JOB_GPUS:-${SLURM_STEP_GPUS:-}}}"
+if [[ -n "${GPU_IDS}" ]]; then
+    GPU_ARGS=(--gpus "device=${GPU_IDS}")
+    echo "=== gpus alocadas pelo SLURM: ${GPU_IDS} ==="
+else
+    GPU_ARGS=(--gpus all)
+    echo "=== aviso: SLURM nao informou GPUs; usando todas do no ==="
+fi
+
 echo "=== notebook execution ==="
 
 docker run \
     --rm \
-    --gpus all \
+    "${GPU_ARGS[@]}" \
     --shm-size=1g \
     --ulimit memlock=-1 \
     --ulimit stack=67108864 \

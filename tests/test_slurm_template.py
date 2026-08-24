@@ -130,3 +130,22 @@ def test_two_submissions_render_distinct_job_names(build):
     second = build(Resources(), job_name="dgx-notebook-b")
     assert "dgx-notebook-a" in (first / "runImage.slurm").read_text()
     assert "dgx-notebook-b" in (second / "runImage.slurm").read_text()
+
+
+def test_template_restricts_docker_to_the_slurm_gpu_allocation(build):
+    """`--gpus all` entrega todas as GPUs do no, ignorando a alocacao.
+
+    Observado em producao: um job que pediu 4 GPUs enxergava as 8 do no, e
+    poderia usar placas alocadas a outro usuario. O template deve repassar ao
+    docker a lista que o SLURM expoe em CUDA_VISIBLE_DEVICES.
+    """
+    content = (build(Resources(gpus=4)) / "runImage.slurm").read_text()
+
+    assert "--gpus all \\" not in content, "o --gpus all incondicional voltou"
+    assert "CUDA_VISIBLE_DEVICES" in content
+    assert 'GPU_ARGS=(--gpus "device=${GPU_IDS}")' in content
+    assert '"${GPU_ARGS[@]}"' in content
+    # array em vez de eval: o caminho do job entra em --mount e um eval
+    # quebraria com espacos
+    assert "eval docker run" not in content
+
