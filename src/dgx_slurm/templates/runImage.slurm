@@ -23,6 +23,12 @@ cleanup() {
 
     docker rmi "${IMAGE_TAG}" >/dev/null 2>&1 || true
 
+    # O payload e uma copia do que o usuario ja tem na propria maquina, e um
+    # bundle com dados pode passar de centenas de MB. Some-se um diretorio por
+    # submissao e o home do cluster enche sozinho. Logs e outputs FICAM: uma
+    # coleta com --async acontece depois, as vezes muito depois.
+    rm -rf "${SCRIPT_DIR}/payload" "${SCRIPT_DIR}/runner" >/dev/null 2>&1 || true
+
     exit "${status}"
 }
 

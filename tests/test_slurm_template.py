@@ -149,3 +149,18 @@ def test_template_restricts_docker_to_the_slurm_gpu_allocation(build):
     # quebraria com espacos
     assert "eval docker run" not in content
 
+
+def test_template_removes_the_uploaded_payload_when_the_job_ends(build):
+    """O payload e copia do que o usuario ja tem; logs e outputs precisam ficar.
+
+    Um bundle com dados passa de centenas de MB e o submitter cria um diretorio
+    por submissao, entao sem limpeza o home do cluster enche sozinho. Logs e
+    outputs nao podem ir junto: uma coleta com --async acontece depois.
+    """
+    content = (build(Resources()) / "runImage.slurm").read_text()
+
+    assert 'rm -rf "${SCRIPT_DIR}/payload" "${SCRIPT_DIR}/runner"' in content
+    limpeza = content[content.index("cleanup()"):content.index("trap cleanup EXIT")]
+    assert "payload" in limpeza, "a limpeza deve rodar no trap, como a da imagem"
+    for preservado in ("/logs", "/outputs"):
+        assert f'rm -rf "${{SCRIPT_DIR}}{preservado}"' not in content
