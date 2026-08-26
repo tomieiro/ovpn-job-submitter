@@ -144,10 +144,10 @@ def test_window_runs_the_job_and_reports_the_executed_notebook(
     monkeypatch.setattr(gui.messagebox, "showinfo", lambda *args: shown.append(args))
 
     app = gui.SubmitterApp(tk_root, runner=fake_runner, is_elevated=lambda: True)
-    app._notebook.set(str(notebook))
-    app._vpn_dir.set(str(vpn_dir))
-    app._include_files.set(True)
-    app._start_job()
+    app.submit_panel.notebook.set(str(notebook))
+    app.submit_panel.vpn_dir.set(str(vpn_dir))
+    app.submit_panel.include_files.set(True)
+    app.submit_panel.start_job()
 
     assert pump(tk_root, lambda: bool(shown))
     assert calls["notebook"] == notebook
@@ -169,13 +169,13 @@ def test_window_reports_failures_without_closing(tk_root, layout, monkeypatch):
     monkeypatch.setattr(gui.messagebox, "showerror", lambda *args: shown.append(args))
 
     app = gui.SubmitterApp(tk_root, runner=failing_runner, is_elevated=lambda: True)
-    app._notebook.set(str(notebook))
-    app._vpn_dir.set(str(vpn_dir))
-    app._start_job()
+    app.submit_panel.notebook.set(str(notebook))
+    app.submit_panel.vpn_dir.set(str(vpn_dir))
+    app.submit_panel.start_job()
 
     assert pump(tk_root, lambda: bool(shown))
     assert "VPN caiu" in shown[-1][1]
-    assert app._submit_button.instate(["!disabled"])
+    assert app.submit_panel.run_button.instate(["!disabled"])
 
 
 def test_host_key_question_crosses_from_the_job_thread_to_the_window(
@@ -194,7 +194,7 @@ def test_host_key_question_crosses_from_the_job_thread_to_the_window(
 
     worker = threading.Thread(
         target=lambda: answers.append(
-            app._confirm_host_key("c4aiscm2", "SHA256:abc")
+            app.confirm_host_key("c4aiscm2", "SHA256:abc")
         ),
         daemon=True,
     )
@@ -213,7 +213,7 @@ def test_invalid_selection_never_starts_a_job(tk_root, monkeypatch):
         raise AssertionError("job must not start")
 
     app = gui.SubmitterApp(tk_root, runner=unexpected_runner, is_elevated=lambda: True)
-    app._start_job()
+    app.submit_panel.start_job()
 
     assert app._worker is None
     assert "Escolha o notebook" in shown[-1][1]
@@ -234,3 +234,247 @@ def test_windows_release_builds_the_gui_executable():
     assert "--additional-hooks-dir pyinstaller-hooks" in build_step
     assert "submit_notebook_gui.py" in build_step
     assert "ovpn-job-submitter-windows-x86_64-gui.exe" in workflow
+
+
+@pytest.fixture
+def store(tmp_path):
+    from dgx_slurm.storage import LocalJobStore
+
+    return LocalJobStore(tmp_path / "jobs.json")
+
+
+def saved_job(notebook, vpn_dir, *, submitted_at):
+    return {
+        "job_name": "dgx-notebook-abc",
+        "notebook": str(notebook),
+        "output": str(notebook.with_name(f"{notebook.stem}.executed.ipynb")),
+        "vpn_dir": str(vpn_dir),
+        "ssh_host": "c4aiscm2",
+        "ssh_port": 22,
+        "submitted_at": submitted_at,
+    }
+
+
+def test_sorted_jobs_puts_the_newest_first():
+    records = {
+        "48100": {"submitted_at": "2026-08-25T17:40:00+00:00"},
+        "48213": {"submitted_at": "2026-08-26T09:12:00+00:00"},
+    }
+    assert [job_id for job_id, _ in gui.sorted_jobs(records)] == ["48213", "48100"]
+
+
+def test_sorted_jobs_keeps_records_that_predate_the_timestamp():
+    """Jobs submitted by an older build have no date; they must still show."""
+    records = {"48100": {}, "48213": {"submitted_at": "2026-08-26T09:12:00+00:00"}}
+    assert [job_id for job_id, _ in gui.sorted_jobs(records)] == ["48213", "48100"]
+
+
+def test_format_submitted_falls_back_when_there_is_no_usable_date():
+    assert gui.format_submitted(None) == "—"
+    assert gui.format_submitted("") == "—"
+    assert gui.format_submitted("ontem") == "—"
+    assert gui.format_submitted("2026-08-26T09:12:00+00:00") != "—"
+
+
+def test_detach_button_submits_without_waiting(tk_root, layout, monkeypatch, store):
+    notebook, vpn_dir = layout
+    calls = {}
+    shown = []
+
+    def fake_runner(selected_notebook, **kwargs):
+        calls["notebook"] = selected_notebook
+        calls.update(kwargs)
+        return "48213"
+
+    monkeypatch.setattr(gui.simpledialog, "askstring", lambda *a, **k: "senha")
+    monkeypatch.setattr(gui.messagebox, "showinfo", lambda *args: shown.append(args))
+
+    app = gui.SubmitterApp(
+        tk_root, runner=fake_runner, store=store, is_elevated=lambda: True
+    )
+    app.submit_panel.notebook.set(str(notebook))
+    app.submit_panel.vpn_dir.set(str(vpn_dir))
+    app.submit_panel.start_job(detach=True)
+
+    assert pump(tk_root, lambda: bool(shown))
+    assert calls["detach"] is True
+    message = shown[-1][1]
+    assert "48213" in message
+    assert "Coletar resultados" in message
+    assert "executado salvo" not in message
+
+
+def test_collect_tab_lists_the_saved_jobs(tk_root, layout, store):
+    notebook, vpn_dir = layout
+    store.save("48100", saved_job(notebook, vpn_dir, submitted_at="2026-08-25T17:40:00+00:00"))
+    store.save("48213", saved_job(notebook, vpn_dir, submitted_at="2026-08-26T09:12:00+00:00"))
+
+    app = gui.SubmitterApp(tk_root, store=store, is_elevated=lambda: True)
+    tree = app.collect_panel.tree
+
+    assert list(tree.get_children()) == ["48213", "48100"]
+    assert tree.set("48213", "notebook") == "experiment.ipynb"
+
+
+def test_collect_sends_the_selected_job_and_keeps_four_remote_dirs(
+    tk_root, layout, monkeypatch, store
+):
+    notebook, vpn_dir = layout
+    store.save("48213", saved_job(notebook, vpn_dir, submitted_at="2026-08-26T09:12:00+00:00"))
+    calls = {}
+    shown = []
+
+    def fake_collector(job_id, **kwargs):
+        calls["job_id"] = job_id
+        calls.update(kwargs)
+        return gui.JobResult(
+            job_id=job_id,
+            state=gui.JobState.COMPLETED,
+            exit_code=0,
+            stdout="",
+            stderr="",
+            executed_notebook=notebook.with_name("experiment.executed.ipynb"),
+        )
+
+    monkeypatch.setattr(gui.simpledialog, "askstring", lambda *a, **k: "senha")
+    monkeypatch.setattr(gui.messagebox, "showinfo", lambda *args: shown.append(args))
+
+    app = gui.SubmitterApp(
+        tk_root, collector=fake_collector, store=store, is_elevated=lambda: True
+    )
+    app.collect_panel.tree.selection_set("48213")
+    app.collect_panel.collect_selected()
+
+    assert pump(tk_root, lambda: bool(shown))
+    assert calls["job_id"] == "48213"
+    assert calls["keep_remote"] == 4
+    assert calls["save_logs"] is True
+    assert calls["password_provider"]() == "senha"
+    assert "experiment.executed.ipynb" in shown[-1][1]
+
+
+def test_collect_reports_a_job_that_produced_no_notebook(
+    tk_root, layout, monkeypatch, store
+):
+    """A failed job still collects: its logs are the only artefact there is."""
+    notebook, vpn_dir = layout
+    store.save("48213", saved_job(notebook, vpn_dir, submitted_at="2026-08-26T09:12:00+00:00"))
+    shown = []
+
+    def fake_collector(job_id, **_kwargs):
+        return gui.JobResult(
+            job_id=job_id,
+            state=gui.JobState.FAILED,
+            exit_code=1,
+            stdout="",
+            stderr="mount: /home nao montado",
+            executed_notebook=None,
+        )
+
+    monkeypatch.setattr(gui.simpledialog, "askstring", lambda *a, **k: "senha")
+    monkeypatch.setattr(gui.messagebox, "showinfo", lambda *args: shown.append(args))
+
+    app = gui.SubmitterApp(
+        tk_root, collector=fake_collector, store=store, is_elevated=lambda: True
+    )
+    app.collect_panel.tree.selection_set("48213")
+    app.collect_panel.collect_selected()
+
+    assert pump(tk_root, lambda: bool(shown))
+    assert "failed" in shown[-1][1].lower()
+    assert "log" in shown[-1][1].lower()
+
+
+def test_collect_without_a_selection_never_connects(tk_root, monkeypatch, store):
+    shown = []
+    monkeypatch.setattr(gui.messagebox, "showerror", lambda *args: shown.append(args))
+
+    def unexpected_collector(*_args, **_kwargs):
+        raise AssertionError("collection must not start")
+
+    app = gui.SubmitterApp(
+        tk_root, collector=unexpected_collector, store=store, is_elevated=lambda: True
+    )
+    app.collect_panel.collect_selected()
+
+    assert app._worker is None
+    assert "Escolha um job" in shown[-1][1]
+
+
+def test_collect_refuses_a_job_saved_before_the_metadata_existed(
+    tk_root, monkeypatch, store
+):
+    store.save("48100", {"job_name": "dgx-notebook-abc"})
+    shown = []
+    monkeypatch.setattr(gui.messagebox, "showerror", lambda *args: shown.append(args))
+
+    def unexpected_collector(*_args, **_kwargs):
+        raise AssertionError("collection must not start")
+
+    app = gui.SubmitterApp(
+        tk_root, collector=unexpected_collector, store=store, is_elevated=lambda: True
+    )
+    app.collect_panel.tree.selection_set("48100")
+    app.collect_panel.collect_selected()
+
+    assert app._worker is None
+    assert "versão antiga" in shown[-1][1]
+
+
+def test_detached_submission_refreshes_the_collect_list(
+    tk_root, layout, monkeypatch, store
+):
+    """The job the user just sent must appear without reopening the program."""
+    notebook, vpn_dir = layout
+    shown = []
+
+    def fake_runner(_notebook, **_kwargs):
+        store.save(
+            "48213",
+            saved_job(notebook, vpn_dir, submitted_at="2026-08-26T09:12:00+00:00"),
+        )
+        return "48213"
+
+    monkeypatch.setattr(gui.simpledialog, "askstring", lambda *a, **k: "senha")
+    monkeypatch.setattr(gui.messagebox, "showinfo", lambda *args: shown.append(args))
+
+    app = gui.SubmitterApp(
+        tk_root, runner=fake_runner, store=store, is_elevated=lambda: True
+    )
+    assert list(app.collect_panel.tree.get_children()) == []
+
+    app.submit_panel.notebook.set(str(notebook))
+    app.submit_panel.vpn_dir.set(str(vpn_dir))
+    app.submit_panel.start_job(detach=True)
+
+    assert pump(tk_root, lambda: bool(shown))
+    assert list(app.collect_panel.tree.get_children()) == ["48213"]
+
+
+def test_both_screens_are_disabled_while_a_job_runs(tk_root, layout, monkeypatch, store):
+    notebook, vpn_dir = layout
+    released = []
+    shown = []
+
+    def slow_runner(*_args, **_kwargs):
+        while not released:
+            time.sleep(0.01)
+        return None
+
+    monkeypatch.setattr(gui.simpledialog, "askstring", lambda *a, **k: "senha")
+    monkeypatch.setattr(gui.messagebox, "showinfo", lambda *args: shown.append(args))
+
+    app = gui.SubmitterApp(
+        tk_root, runner=slow_runner, store=store, is_elevated=lambda: True
+    )
+    app.submit_panel.notebook.set(str(notebook))
+    app.submit_panel.vpn_dir.set(str(vpn_dir))
+    app.submit_panel.start_job()
+
+    assert pump(tk_root, lambda: app.submit_panel.run_button.instate(["disabled"]))
+    assert app.submit_panel.detach_button.instate(["disabled"])
+    assert app.collect_panel.collect_button.instate(["disabled"])
+
+    released.append(True)
+    assert pump(tk_root, lambda: bool(shown))
+    assert app.collect_panel.collect_button.instate(["!disabled"])
