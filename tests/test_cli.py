@@ -157,3 +157,19 @@ def test_cli_prints_library_errors_without_traceback(capsys):
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == "Erro: notebook inválido\n"
+
+
+def test_cli_without_arguments_reports_a_configuration_error(capsys):
+    """The guard clauses raise ConfigurationError, so it must be imported."""
+    assert main([]) == 1
+    assert "Erro:" in capsys.readouterr().err
+
+
+def test_cli_rejects_positional_arguments_with_collect_results(capsys):
+    def collector(*_args, **_kwargs):
+        raise AssertionError("collection must not start")
+
+    assert main(
+        ["notebook.ipynb", "vpn", "--collect-results", "48192"], collector=collector
+    ) == 1
+    assert "Erro:" in capsys.readouterr().err

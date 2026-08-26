@@ -6,7 +6,7 @@ import argparse
 import sys
 from collections.abc import Callable, Sequence
 
-from .errors import DGXError
+from .errors import ConfigurationError, DGXError
 from .models import JobResult
 from .workflow import collect_results, run_notebook
 
