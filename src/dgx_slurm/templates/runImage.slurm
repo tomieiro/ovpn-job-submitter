@@ -40,11 +40,42 @@ echo "=== node: $(hostname) ==="
 echo "=== job: ${SLURM_JOB_ID} ==="
 echo "=== docker build: ${IMAGE_TAG} ==="
 
-docker build \
-    --progress=plain \
-    -t "${IMAGE_TAG}" \
-    -f "${DOCKERFILE}" \
-    "${SCRIPT_DIR}"
+# O job 11883 morreu aqui depois de uma noite na fila: o no nao resolveu
+# nvcr.io ("lookup nvcr.io on 127.0.0.53:53: i/o timeout"). Nenhuma hora de GPU
+# foi gasta, mas a submissao inteira se perdeu por uma queda de DNS transitoria.
+#
+# Duas camadas de defesa. Primeiro repetir, que resolve a queda passageira.
+# Depois o builder legado: o BuildKit faz um HEAD no registry para resolver o
+# manifesto do FROM mesmo quando a imagem base ja esta no no -- e ela esta,
+# porque o cleanup() so remove a imagem do job. Sem rede, o legado constroi a
+# partir da copia local; o BuildKit nao.
+if docker image inspect "$(awk '/^FROM /{print $2; exit}' "${DOCKERFILE}")" \
+        >/dev/null 2>&1; then
+    echo "=== imagem base ja presente no no ==="
+fi
+
+build_image() {
+    local espera
+    for espera in 15 60 120; do
+        if docker build \
+                --progress=plain \
+                -t "${IMAGE_TAG}" \
+                -f "${DOCKERFILE}" \
+                "${SCRIPT_DIR}"; then
+            return 0
+        fi
+        echo "=== build falhou; nova tentativa em ${espera}s ==="
+        sleep "${espera}"
+    done
+
+    echo "=== tentando o builder legado, sem consultar o registry ==="
+    DOCKER_BUILDKIT=0 docker build \
+        -t "${IMAGE_TAG}" \
+        -f "${DOCKERFILE}" \
+        "${SCRIPT_DIR}"
+}
+
+build_image
 
 # O SLURM ja restringe as GPUs do job, expondo os indices alocados em
 # CUDA_VISIBLE_DEVICES (ou SLURM_JOB_GPUS, conforme a versao). `--gpus all`

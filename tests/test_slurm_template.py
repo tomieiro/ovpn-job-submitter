@@ -195,6 +195,84 @@ def test_gpu_args_survive_docker_csv_splitting(build, alocadas, esperado):
     )
 
 
+def test_build_retries_and_falls_back_when_the_registry_is_unreachable(build, tmp_path):
+    """Uma queda de DNS no no nao pode custar a submissao inteira.
+
+    O job 11883 passou a noite na fila e morreu no docker build porque o no nao
+    resolveu nvcr.io. Nenhuma hora de GPU foi gasta -- e justamente por isso o
+    prejuizo passou despercebido ate a coleta da manha seguinte.
+
+    O BuildKit faz um HEAD no registry para resolver o manifesto do FROM mesmo
+    com a imagem base ja no no, e ela esta la: cleanup() so remove a imagem do
+    job. O builder legado usa a copia local. Testa-se com um docker falso, para
+    exercitar o fluxo real do script em vez de casar strings.
+    """
+    import os
+    import subprocess
+
+    content = (build(Resources(gpus=4)) / "runImage.slurm").read_text()
+    inicio = content.index("build_image() {")
+    fim = content.index("\nbuild_image\n", inicio) + len("\nbuild_image\n")
+    bloco = content[inicio:fim]
+
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text("FROM nvcr.io/nvidia/pytorch:26.05-py3\n")
+
+    binario = tmp_path / "bin"
+    binario.mkdir()
+    (binario / "docker").write_text(
+        "#!/usr/bin/env bash\n"
+        'contador="$TMPDIR_TESTE/n"\n'
+        'n=$(( $(cat "$contador" 2>/dev/null || echo 0) + 1 ))\n'
+        'echo "$n" > "$contador"\n'
+        '[[ "${DOCKER_BUILDKIT:-}" == "0" ]] && exit "${LEGADO_FALHA:-0}"\n'
+        'if (( n <= ${FALHAS:-0} )); then exit 1; fi\n'
+        "exit 0\n"
+    )
+    (binario / "docker").chmod(0o755)
+
+    def roda(falhas, legado_falha=0):
+        script = tmp_path / "s.sh"
+        script.write_text(
+            "#!/bin/bash\nset -euo pipefail\nsleep() { :; }\n"
+            + bloco
+            + '\necho MARCADOR_POS_BUILD\n'
+        )
+        script.chmod(0o755)
+        (tmp_path / "n").unlink(missing_ok=True)
+        env = dict(
+            os.environ,
+            PATH=f"{binario}:{os.environ['PATH']}",
+            DOCKERFILE=str(dockerfile),
+            SCRIPT_DIR=str(tmp_path),
+            IMAGE_TAG="teste:latest",
+            TMPDIR_TESTE=str(tmp_path),
+            FALHAS=str(falhas),
+            LEGADO_FALHA=str(legado_falha),
+        )
+        return subprocess.run(
+            [str(script)], capture_output=True, text=True, env=env
+        )
+
+    # duas quedas transitorias: a terceira tentativa do BuildKit resolve
+    r = roda(falhas=2)
+    assert r.returncode == 0, r.stderr
+    assert "MARCADOR_POS_BUILD" in r.stdout
+
+    # registry inalcancavel o tempo todo: cai no builder legado e segue
+    r = roda(falhas=99)
+    assert r.returncode == 0, r.stderr
+    assert "builder legado" in r.stdout
+    assert "MARCADOR_POS_BUILD" in r.stdout
+
+    # nem o legado constroi: precisa ABORTAR, nunca seguir para o docker run
+    r = roda(falhas=99, legado_falha=1)
+    assert r.returncode != 0, "build falho nao abortou o script"
+    assert "MARCADOR_POS_BUILD" not in r.stdout, (
+        "seguiu para o docker run com a imagem inexistente"
+    )
+
+
 def test_template_removes_the_uploaded_payload_when_the_job_ends(build):
     """O payload e copia do que o usuario ja tem; logs e outputs precisam ficar.
 
