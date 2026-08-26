@@ -8,6 +8,7 @@ import re
 import shutil
 import tempfile
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -159,6 +160,9 @@ async def run_notebook_async(
                     "ssh_host": ssh_host,
                     "ssh_port": ssh_port,
                     "username": cluster_username,
+                    "submitted_at": datetime.now(timezone.utc).isoformat(
+                        timespec="seconds"
+                    ),
                 },
             )
             print(f"Job submetido: {job.id}")

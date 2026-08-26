@@ -23,6 +23,10 @@ class LocalJobStore:
     def load(self, job_id: str) -> dict | None:
         return self._read_all().get(job_id)
 
+    def list_all(self) -> dict[str, dict]:
+        """Every saved record, freshly read so callers cannot mutate the store."""
+        return self._read_all()
+
     def _read_all(self) -> dict:
         if not self._path.exists():
             return {}

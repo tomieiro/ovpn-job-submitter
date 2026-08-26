@@ -1,3 +1,4 @@
+from datetime import datetime
 import inspect
 from pathlib import Path
 
@@ -252,3 +253,17 @@ async def test_high_level_workflow_returns_partial_notebook_then_raises(
         )
 
     assert (project / "experiment.executed.ipynb").exists()
+
+
+@pytest.mark.asyncio
+async def test_submission_records_when_the_job_was_sent(tmp_path, monkeypatch):
+    """The collect screen orders jobs by date, so submit must stamp one."""
+    _, notebook, ovpn = make_layout(tmp_path)
+    monkeypatch.setattr("dgx_slurm.workflow.DGXClient", FakeClient)
+    FakeClient.instances.clear()
+
+    await run_notebook_async(notebook, **required_job_args(ovpn.parent), detach=True)
+
+    stamped = FakeClient.instances[-1].job.metadata["submitted_at"]
+    moment = datetime.fromisoformat(stamped)
+    assert moment.tzinfo is not None

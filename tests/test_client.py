@@ -304,3 +304,25 @@ def test_prune_remote_jobs_touches_nothing_outside_the_base_directory():
     for comando in transporte.comandos:
         if comando.startswith("rm -rf"):
             assert comando.startswith("rm -rf dgx-slurm-jobs/")
+
+
+def test_job_store_lists_every_saved_record(tmp_path):
+    """The collect screen needs the whole store, not one job at a time."""
+    store = LocalJobStore(tmp_path / "jobs.json")
+    assert store.list_all() == {}
+
+    store.save("48192", {"job_name": "dgx-notebook-abc", "notebook": "/a.ipynb"})
+    store.save("48200", {"job_name": "dgx-notebook-def", "notebook": "/b.ipynb"})
+
+    listed = store.list_all()
+    assert sorted(listed) == ["48192", "48200"]
+    assert listed["48200"]["notebook"] == "/b.ipynb"
+
+
+def test_job_store_listing_is_a_copy(tmp_path):
+    store = LocalJobStore(tmp_path / "jobs.json")
+    store.save("48192", {"job_name": "dgx-notebook-abc"})
+
+    store.list_all()["48192"]["job_name"] = "mutated"
+
+    assert store.load("48192")["job_name"] == "dgx-notebook-abc"
