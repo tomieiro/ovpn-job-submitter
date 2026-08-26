@@ -143,11 +143,56 @@ def test_template_restricts_docker_to_the_slurm_gpu_allocation(build):
 
     assert "--gpus all \\" not in content, "o --gpus all incondicional voltou"
     assert "CUDA_VISIBLE_DEVICES" in content
-    assert 'GPU_ARGS=(--gpus "device=${GPU_IDS}")' in content
     assert '"${GPU_ARGS[@]}"' in content
     # array em vez de eval: o caminho do job entra em --mount e um eval
     # quebraria com espacos
     assert "eval docker run" not in content
+
+
+@pytest.mark.parametrize(
+    "alocadas, esperado",
+    [
+        ("0", '"device=0"'),
+        ("0,1,2,3", '"device=0,1,2,3"'),
+        ("2,5", '"device=2,5"'),
+    ],
+)
+def test_gpu_args_survive_docker_csv_splitting(build, alocadas, esperado):
+    """O valor de --gpus precisa chegar ao docker com aspas literais.
+
+    O docker faz split CSV no valor de --gpus. Sem as aspas internas,
+    `device=0,1,2,3` vira os campos `device=0`, `1`, `2` e `3`; o `1` e lido
+    como *count* e o daemon recusa com "cannot set both Count and DeviceIDs on
+    device request". Foi o que matou o job 11882.
+
+    Com uma GPU nao ha virgula e nada quebra, entao um teste de string sobre o
+    template nao pega o defeito -- este executa o bloco e inspeciona o argv.
+    """
+    import subprocess
+    import textwrap
+
+    content = (build(Resources(gpus=4)) / "runImage.slurm").read_text()
+    bloco = content[content.index("GPU_IDS="):content.index("echo \"=== notebook execution")]
+
+    script = textwrap.dedent(
+        """
+        set -u
+        CUDA_VISIBLE_DEVICES="{alocadas}"
+        SLURM_JOB_GPUS=""
+        SLURM_STEP_GPUS=""
+        {bloco}
+        for a in "${{GPU_ARGS[@]}}"; do printf '%s\\n' "$a"; done
+        """
+    ).format(alocadas=alocadas, bloco=bloco)
+
+    saida = subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, check=True
+    ).stdout.splitlines()
+
+    argv = [linha for linha in saida if not linha.startswith("===")]
+    assert argv == ["--gpus", esperado], (
+        f"argv inesperado: {argv!r}; docker recusaria a forma sem aspas"
+    )
 
 
 def test_template_removes_the_uploaded_payload_when_the_job_ends(build):

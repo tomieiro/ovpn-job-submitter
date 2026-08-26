@@ -56,7 +56,12 @@ docker build \
 # quebraria se ele contivesse espacos.
 GPU_IDS="${CUDA_VISIBLE_DEVICES:-${SLURM_JOB_GPUS:-${SLURM_STEP_GPUS:-}}}"
 if [[ -n "${GPU_IDS}" ]]; then
-    GPU_ARGS=(--gpus "device=${GPU_IDS}")
+    # As aspas dentro do valor sao literais e obrigatorias: o docker faz split
+    # CSV em --gpus, entao "device=0,1,2,3" viraria os campos `device=0`, `1`,
+    # `2` e `3`, e o `1` seria lido como *count* -- "cannot set both Count and
+    # DeviceIDs on device request". Com uma GPU nao ha virgula e o erro nao
+    # aparece, que foi por que passou despercebido ate o job 11882.
+    GPU_ARGS=(--gpus "\"device=${GPU_IDS}\"")
     echo "=== gpus alocadas pelo SLURM: ${GPU_IDS} ==="
 else
     GPU_ARGS=(--gpus all)
