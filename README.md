@@ -93,17 +93,35 @@ certificados referenciados por ele.
 ### Pela janela (Windows)
 
 Clique com o botão direito em `ovpn-job-submitter-windows-x86_64-gui.exe` e
-escolha **Executar como administrador**. A janela pede apenas três coisas:
+escolha **Executar como administrador**. A janela tem duas abas.
+
+Na aba **Enviar**, informe:
 
 1. o notebook `.ipynb`;
 2. a pasta da VPN (`.ovpn` + certificados);
 3. a caixa **Enviar também os outros arquivos da pasta do notebook**, que
    equivale ao `--include-files`.
 
-Ao clicar em **Executar no cluster**, a senha do cluster é pedida uma vez e
-todo o andamento aparece no painel de log da própria janela. Se o programa for
-aberto sem privilégios de administrador, a janela avisa e oferece o botão
-**Reabrir como administrador**.
+Depois escolha um dos dois botões:
+
+- **Executar e aguardar** mantém a janela conectada até o job terminar e salva
+  o notebook executado ao final;
+- **Enviar sem aguardar** devolve a janela assim que o job entra na fila e
+  mostra o ID do SLURM. Equivale ao `--async`: você pode fechar o programa e
+  desligar a VPN.
+
+Na aba **Coletar resultados** ficam listados os jobs já enviados por este
+computador, do mais recente para o mais antigo. Escolha um que já tenha
+terminado e clique em **Coletar selecionado** para reconectar e baixar o
+notebook executado. Os logs do job (`job.out` e `job.err`) são sempre salvos
+junto dos resultados, e os diretórios antigos no cluster são podados
+automaticamente, preservando os 4 mais recentes — o mesmo que
+`--collect-even-error --keep-remote 4` na linha de comando.
+
+Em qualquer das duas abas a senha do cluster é pedida uma vez e todo o
+andamento aparece no painel de log compartilhado. Se o programa for aberto sem
+privilégios de administrador, a janela avisa e oferece o botão **Reabrir como
+administrador**.
 
 Os demais valores (partição, GPUs, CPUs, memória, tempo) usam os mesmos padrões
 da linha de comando; para alterá-los, use o executável de terminal.
