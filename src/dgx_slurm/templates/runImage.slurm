@@ -101,7 +101,27 @@ build_image
 #
 # Usa array em vez de eval: o caminho do job entra em --mount e um eval
 # quebraria se ele contivesse espacos.
-GPU_IDS="${CUDA_VISIBLE_DEVICES:-${SLURM_JOB_GPUS:-${SLURM_STEP_GPUS:-}}}"
+#
+# Mas CUDA_VISIBLE_DEVICES e relativo ao cgroup do job: com ConstrainDevices o
+# SLURM mostra as placas alocadas como 0..N-1. O docker fala com o daemon, fora
+# do cgroup, e le "device=0,1" como as GPUs 0 e 1 DO HOST. O job 12484 recebeu
+# IDX 2-3, rodou nas placas 0-1 em cima do job 12483, e o 12483 morreu de OOM.
+# Dentro da alocacao o nvidia-smi enxerga exatamente as placas do job, entao os
+# indices locais viram UUIDs, que o docker resolve sem ambiguidade. Sem
+# nvidia-smi, SLURM_JOB_GPUS traz indices globais.
+LOCAL_GPU_IDS="${CUDA_VISIBLE_DEVICES:-}"
+GPU_IDS=""
+if [[ -n "${LOCAL_GPU_IDS}" ]] && command -v nvidia-smi >/dev/null 2>&1; then
+    GPU_IDS="$(nvidia-smi -i "${LOCAL_GPU_IDS}" --query-gpu=uuid \
+        --format=csv,noheader 2>/dev/null | tr -d ' ' | paste -sd, - || true)"
+    if [[ "$(tr ',' '\n' <<<"${GPU_IDS}" | grep -c . || true)" \
+            != "$(tr ',' '\n' <<<"${LOCAL_GPU_IDS}" | grep -c . || true)" ]]; then
+        GPU_IDS=""
+    fi
+fi
+if [[ -z "${GPU_IDS}" ]]; then
+    GPU_IDS="${SLURM_JOB_GPUS:-${SLURM_STEP_GPUS:-${LOCAL_GPU_IDS}}}"
+fi
 if [[ -n "${GPU_IDS}" ]]; then
     # As aspas dentro do valor sao literais e obrigatorias: o docker faz split
     # CSV em --gpus, entao "device=0,1,2,3" viraria os campos `device=0`, `1`,
@@ -129,7 +149,14 @@ docker run \
     --mount \
     "type=bind,src=${SCRIPT_DIR}/outputs,dst=/workspace/outputs" \
     "${DATASET_MOUNT[@]}" \
-    "${IMAGE_TAG}"
+    "${IMAGE_TAG}" &
+
+# O bash so executa um trap quando o comando em primeiro plano termina. Com
+# `docker run` em primeiro plano, o scancel mandava TERM, o trap esperava o
+# cliente docker, o SIGKILL do KillWait chegava antes e o container do job
+# 12484 seguiu rodando sem alocacao. `wait` e interrompido pelo sinal, entao o
+# cleanup remove o container imediatamente.
+wait "$!"
 
 echo
 echo "Done (image will be removed from the node on exit)."

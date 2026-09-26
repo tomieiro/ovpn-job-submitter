@@ -189,11 +189,12 @@ def test_gpu_args_survive_docker_csv_splitting(build, alocadas, esperado):
     import textwrap
 
     content = (build(Resources(gpus=4)) / "runImage.slurm").read_text()
-    bloco = content[content.index("GPU_IDS="):content.index("echo \"=== notebook execution")]
+    bloco = content[content.index("LOCAL_GPU_IDS="):content.index("echo \"=== notebook execution")]
 
     script = textwrap.dedent(
         """
         set -u
+        nvidia-smi() {{ return 1; }}
         CUDA_VISIBLE_DEVICES="{alocadas}"
         SLURM_JOB_GPUS=""
         SLURM_STEP_GPUS=""
@@ -304,3 +305,112 @@ def test_template_removes_the_uploaded_payload_when_the_job_ends(build):
     assert "payload" in limpeza, "a limpeza deve rodar no trap, como a da imagem"
     for preservado in ("/logs", "/outputs"):
         assert f'rm -rf "${{SCRIPT_DIR}}{preservado}"' not in content
+
+
+def test_gpu_args_translate_cgroup_indices_to_host_uuids(build):
+    """Indices do cgroup nao valem para o daemon do docker.
+
+    Com ConstrainDevices, o job 12484 recebeu IDX 2-3 mas via
+    CUDA_VISIBLE_DEVICES=0,1; `device=0,1` pos o container nas placas 0-1 do
+    host, em cima do job 12483. Dentro da alocacao o nvidia-smi traduz os
+    indices locais para os UUIDs das placas alocadas.
+    """
+    import subprocess
+    import textwrap
+
+    content = (build(Resources(gpus=2)) / "runImage.slurm").read_text()
+    bloco = content[content.index("LOCAL_GPU_IDS="):content.index("echo \"=== notebook execution")]
+    script = textwrap.dedent(
+        """
+        set -euo pipefail
+        nvidia-smi() {{
+            [ "$2" = "0,1" ] || return 9
+            printf 'GPU-aaa\\nGPU-bbb\\n'
+        }}
+        CUDA_VISIBLE_DEVICES="0,1"
+        SLURM_JOB_GPUS="2,3"
+        {bloco}
+        for a in "${{GPU_ARGS[@]}}"; do printf '%s\\n' "$a"; done
+        """
+    ).format(bloco=bloco)
+    saida = subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, check=True
+    ).stdout.splitlines()
+    argv = [linha for linha in saida if not linha.startswith("===")]
+    assert argv == ["--gpus", '"device=GPU-aaa,GPU-bbb"']
+
+
+def test_gpu_args_fall_back_to_global_slurm_indices(build):
+    """Se o nvidia-smi nao responder, usa os indices globais do SLURM."""
+    import subprocess
+    import textwrap
+
+    content = (build(Resources(gpus=2)) / "runImage.slurm").read_text()
+    bloco = content[content.index("LOCAL_GPU_IDS="):content.index("echo \"=== notebook execution")]
+    script = textwrap.dedent(
+        """
+        set -euo pipefail
+        nvidia-smi() {{ printf 'GPU-only-one\\n'; }}
+        CUDA_VISIBLE_DEVICES="0,1"
+        SLURM_JOB_GPUS="2,3"
+        {bloco}
+        for a in "${{GPU_ARGS[@]}}"; do printf '%s\\n' "$a"; done
+        """
+    ).format(bloco=bloco)
+    saida = subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, check=True
+    ).stdout.splitlines()
+    argv = [linha for linha in saida if not linha.startswith("===")]
+    assert argv == ["--gpus", '"device=2,3"']
+
+
+def test_scancel_removes_the_container_before_the_kill_wait(build, tmp_path):
+    """TERM precisa disparar o cleanup enquanto o container ainda roda.
+
+    Com `docker run` em primeiro plano o bash adiava o trap ate o cliente
+    docker terminar; o SIGKILL do SLURM chegava antes e o container do job
+    12484 sobreviveu ao scancel, ocupando GPUs fora da alocacao.
+    """
+    import os
+    import signal
+    import subprocess
+    import textwrap
+    import time
+
+    content = (build(Resources(gpus=2)) / "runImage.slurm").read_text()
+    limpeza = content[content.index("cleanup()"):content.index("mkdir -p")]
+    execucao = content[content.index("docker run \\"):]
+    log = tmp_path / "docker.log"
+    fake = tmp_path / "bin" / "docker"
+    fake.parent.mkdir()
+    fake.write_text(
+        "#!/bin/bash\n"
+        f'echo "$*" >> {log}\n'
+        '[ "$1" = run ] && exec sleep 60\n'
+        "exit 0\n"
+    )
+    fake.chmod(0o755)
+    script = textwrap.dedent(
+        """
+        set -euo pipefail
+        SLURM_JOB_ID=7
+        SCRIPT_DIR={tmp}
+        IMAGE_TAG=img
+        CONTAINER_NAME=dgx-notebook-7
+        GPU_ARGS=(--gpus all)
+        DATASET_MOUNT=()
+        """
+    ).format(tmp=tmp_path) + limpeza + execucao
+    process = subprocess.Popen(
+        ["bash", "-c", script],
+        env={**os.environ, "PATH": f"{fake.parent}:{os.environ['PATH']}"},
+    )
+    for _ in range(50):
+        if log.exists() and "run" in log.read_text():
+            break
+        time.sleep(0.1)
+    started = time.monotonic()
+    process.send_signal(signal.SIGTERM)
+    process.wait(timeout=10)
+    assert time.monotonic() - started < 5
+    assert "rm -f dgx-notebook-7" in log.read_text()
