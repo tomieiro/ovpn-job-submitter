@@ -74,6 +74,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--keep-vpn", action="store_true",
+        help=(
+            "não derruba o túnel ao terminar, para que a próxima execução o "
+            "reaproveite e pule o handshake e o sudo (um túnel que já estava "
+            "aberto nunca é derrubado, com ou sem esta opção)"
+        ),
+    )
+    parser.add_argument(
         "--keep-remote", type=int, default=4, metavar="N",
         help=(
             "após coletar, remove do cluster os diretórios de job mais antigos, "
@@ -101,6 +109,7 @@ def main(
                 host_key_confirmer=confirm_host_key,
                 save_logs=args.collect_even_error,
                 keep_remote=args.keep_remote,
+                keep_vpn=args.keep_vpn,
             )
             return 0
         if args.notebook is None or args.vpn_dir is None:
@@ -117,6 +126,7 @@ def main(
             memory=args.memory,
             time_limit=args.time_limit,
             detach=args.detach,
+            keep_vpn=args.keep_vpn,
             host_key_confirmer=confirm_host_key,
         )
     except DGXError as exc:

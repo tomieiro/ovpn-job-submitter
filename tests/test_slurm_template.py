@@ -100,16 +100,33 @@ def test_mounts_outputs_directory(build):
     assert "type=bind,src=${SCRIPT_DIR}/outputs,dst=/workspace/outputs" in content
 
 
+def test_mounts_shared_home_datasets_read_only(build):
+    bundle_root = build(Resources())
+    content = (bundle_root / "runImage.slurm").read_text()
+    assert 'SHARED_DATASETS="${DGX_SHARED_DATASETS:-${HOME}/datasets}"' in content
+    assert "type=bind,src=${SHARED_DATASETS},dst=/datasets,readonly" in content
+    assert '"${DATASET_MOUNT[@]}"' in content
+
+
 def test_installs_trap_exit(build):
     bundle_root = build(Resources())
     content = (bundle_root / "runImage.slurm").read_text()
-    assert "trap cleanup EXIT" in content
+    assert "trap cleanup EXIT TERM INT HUP" in content
 
 
 def test_cleanup_runs_docker_rmi(build):
     bundle_root = build(Resources())
     content = (bundle_root / "runImage.slurm").read_text()
     assert "docker rmi" in content
+
+
+def test_cleanup_force_removes_the_named_container(build):
+    bundle_root = build(Resources())
+    content = (bundle_root / "runImage.slurm").read_text()
+    assert 'CONTAINER_NAME="${CONTAINER_NAME:-dgx-notebook-${SLURM_JOB_ID}}"' in content
+    assert 'docker rm -f "${CONTAINER_NAME}"' in content
+    assert '--name "${CONTAINER_NAME}"' in content
+    assert '--label "dgx.slurm_job=${SLURM_JOB_ID}"' in content
 
 
 def test_cleanup_preserves_exit_code(build):

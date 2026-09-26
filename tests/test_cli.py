@@ -33,6 +33,7 @@ def test_cli_passes_required_paths_and_defaults():
         "memory": DEFAULT_MEMORY,
         "time_limit": DEFAULT_TIME_LIMIT,
         "detach": False,
+        "keep_vpn": False,
     }
 
 
@@ -79,6 +80,7 @@ def test_cli_include_files_and_optional_overrides():
         "memory": "128G",
         "time_limit": "02:30:00",
         "detach": False,
+        "keep_vpn": False,
     }
 
 

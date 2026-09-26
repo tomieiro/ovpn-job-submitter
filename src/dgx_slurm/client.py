@@ -46,6 +46,7 @@ class DGXClient:
         ssh_port: int,
         known_hosts_path: Path | str | None = None,
         sudo_openvpn: bool = True,
+        keep_vpn: bool = False,
         vpn: VPNConnection | None = None,
         transport: SSHTransport | None = None,
         bundle_builder: NotebookBundleBuilder | None = None,
@@ -64,6 +65,7 @@ class DGXClient:
         self._ssh_port = ssh_port
         self._known_hosts_path = known_hosts_path
         self._sudo_openvpn = sudo_openvpn
+        self._keep_vpn = keep_vpn
         self._vpn = vpn
         self._transport = transport
         self._bundle_builder = bundle_builder or NotebookBundleBuilder()
@@ -179,7 +181,16 @@ class DGXClient:
         if self._transport is not None:
             self._transport.close()
         if self._vpn is not None:
-            self._vpn.disconnect()
+            # Tearing the tunnel down means the next invocation pays for the
+            # handshake and the sudo prompt again. Leaving it up lets
+            # VPNConnection.connect() take its is_reachable() short circuit.
+            # A tunnel we did not start is never touched either way.
+            if self._keep_vpn and self._vpn.started_by_us:
+                self._print_fn(
+                    "VPN mantida aberta (--keep-vpn); use 'sudo pkill openvpn' para fechar."
+                )
+            else:
+                self._vpn.disconnect()
         self._connected = False
 
     def _ensure_connected(self) -> None:
@@ -187,13 +198,17 @@ class DGXClient:
             return
 
         if self._vpn is None:
+            reachable = _default_is_reachable(self._ssh_host, self._ssh_port)
+            # Only ask for credentials if the tunnel actually has to be built.
+            # The same secret is still needed for SSH below, so this does not
+            # remove the prompt -- it removes it from the path where the VPN is
+            # already up and a key or agent could carry the SSH side.
+            vpn_password = "" if reachable() else self._get_password()
             self._vpn = VPNConnection(
                 ovpn_path=self._ovpn_path,
                 username=self._username,
-                password=self._get_password(),
-                is_reachable=_default_is_reachable(
-                    self._ssh_host, self._ssh_port
-                ),
+                password=vpn_password,
+                is_reachable=reachable,
                 use_sudo=self._sudo_openvpn,
             )
         self._print_fn("Conectando à VPN, se necessário...")
@@ -205,7 +220,9 @@ class DGXClient:
                 host=self._ssh_host,
                 port=self._ssh_port,
                 username=self._username,
-                password=self._get_password(),
+                # Deferred: an authorised key means the prompt never happens.
+                password=self._password,
+                password_provider=self._get_password,
                 known_hosts_path=self._known_hosts_path,
                 host_key_confirmer=self._host_key_confirmer,
                 print_fn=self._print_fn,

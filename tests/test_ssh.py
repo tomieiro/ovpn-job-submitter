@@ -100,6 +100,8 @@ class FakeSSHClient:
         self.sftp = FakeSFTPClient()
         self.closed = False
         self.raise_on_connect = None
+        self.connect_attempts = []
+        self.reject_until_password = False
         FakeSSHClient.instances.append(self)
 
     def load_system_host_keys(self):
@@ -112,6 +114,9 @@ class FakeSSHClient:
         self.missing_host_key_policy = policy
 
     def connect(self, **kwargs):
+        self.connect_attempts.append(kwargs)
+        if self.reject_until_password and kwargs.get("password") is None:
+            raise paramiko.AuthenticationException("no valid key")
         if self.raise_on_connect:
             raise self.raise_on_connect
         self.connect_kwargs = kwargs
@@ -461,3 +466,52 @@ def test_close_closes_sftp_and_client_explicitly(client_factory):
     transport.close()
     assert client.sftp.closed is True
     assert client.closed is True
+
+
+def test_key_authentication_is_tried_before_any_password_prompt():
+    """An authorised key means the provider is never called."""
+    FakeSSHClient.instances.clear()
+    asked = []
+
+    def never() -> str:
+        asked.append(1)
+        return "secret"
+
+    transport = SSHTransport(
+        host="cluster.internal",
+        username="user",
+        password_provider=never,
+        client_factory=FakeSSHClient,
+    )
+    transport.connect()
+
+    client = FakeSSHClient.instances[-1]
+    assert asked == []
+    assert len(client.connect_attempts) == 1
+    assert client.connect_attempts[0]["password"] is None
+
+
+def test_password_is_requested_only_after_the_keys_are_refused():
+    FakeSSHClient.instances.clear()
+    asked = []
+
+    def provider() -> str:
+        asked.append(1)
+        return "secret"
+
+    def factory():
+        client = FakeSSHClient()
+        client.reject_until_password = True
+        return client
+
+    transport = SSHTransport(
+        host="cluster.internal",
+        username="user",
+        password_provider=provider,
+        client_factory=factory,
+    )
+    transport.connect()
+
+    client = FakeSSHClient.instances[-1]
+    assert asked == [1]
+    assert [a["password"] for a in client.connect_attempts] == [None, "secret"]

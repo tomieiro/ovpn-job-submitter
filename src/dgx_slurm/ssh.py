@@ -114,6 +114,7 @@ class SSHTransport:
         username: str,
         port: int = 22,
         password: str | None = None,
+        password_provider: Callable[[], str] | None = None,
         key_filename: str | None = None,
         known_hosts_path: Path | str | None = None,
         client_factory: ClientFactory = paramiko.SSHClient,
@@ -128,6 +129,7 @@ class SSHTransport:
         self._port = port
         self._username = username
         self._password = password
+        self._password_provider = password_provider
         self._key_filename = key_filename
         self._known_hosts_path = str(known_hosts_path) if known_hosts_path else None
         self._client_factory = client_factory
@@ -164,15 +166,33 @@ class SSHTransport:
         if self._known_hosts_path:
             client.load_host_keys(self._known_hosts_path)
         client.set_missing_host_key_policy(paramiko.RejectPolicy())
-        client.connect(
-            hostname=self._host,
-            port=self._port,
-            username=self._username,
-            password=self._password,
-            key_filename=self._key_filename,
-            timeout=self._connect_timeout,
+        # Try key and agent authentication before asking for anything. The
+        # password is only materialised once the server has actually refused
+        # the keys, so an authorised key means no prompt at all.
+        attempts = [self._password]
+        if self._password is None and self._password_provider is not None:
+            attempts = [None, self._password_provider]
+
+        last: paramiko.AuthenticationException | None = None
+        for attempt in attempts:
+            secret = attempt() if callable(attempt) else attempt
+            try:
+                client.connect(
+                    hostname=self._host,
+                    port=self._port,
+                    username=self._username,
+                    password=secret,
+                    key_filename=self._key_filename,
+                    timeout=self._connect_timeout,
+                )
+                if secret is not None:
+                    self._password = secret
+                return client
+            except paramiko.AuthenticationException as exc:
+                last = exc
+        raise last if last is not None else paramiko.AuthenticationException(
+            "authentication failed"
         )
-        return client
 
     def _as_ssh_error(self, exc: Exception) -> SSHError:
         if isinstance(exc, paramiko.BadHostKeyException):

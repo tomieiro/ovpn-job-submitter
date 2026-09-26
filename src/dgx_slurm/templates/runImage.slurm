@@ -15,12 +15,17 @@ set -euo pipefail
 SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 DOCKERFILE="${DOCKERFILE:-${SCRIPT_DIR}/Dockerfile}"
 IMAGE_TAG="${IMAGE_TAG:-dgx-notebook-${SLURM_JOB_ID}:latest}"
+CONTAINER_NAME="${CONTAINER_NAME:-dgx-notebook-${SLURM_JOB_ID}}"
 
 cleanup() {
     local status=$?
 
-    trap - EXIT
+    trap - EXIT TERM INT HUP
 
+    # `docker run` is a client of the daemon. If SLURM kills the batch shell,
+    # disconnecting that client does not stop the container; explicitly remove
+    # the job-named container so GPU ranks cannot survive their allocation.
+    docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
     docker rmi "${IMAGE_TAG}" >/dev/null 2>&1 || true
 
     # O payload e uma copia do que o usuario ja tem na propria maquina, e um
@@ -32,9 +37,20 @@ cleanup() {
     exit "${status}"
 }
 
-trap cleanup EXIT
+trap cleanup EXIT TERM INT HUP
 
 mkdir -p "${SCRIPT_DIR}/outputs"
+
+# The user's home is shared by the compute nodes. Expose its dataset catalog
+# read-only so large immutable corpora never need to enter each Docker image.
+SHARED_DATASETS="${DGX_SHARED_DATASETS:-${HOME}/datasets}"
+DATASET_MOUNT=()
+if [ -d "${SHARED_DATASETS}" ]; then
+    DATASET_MOUNT=(--mount "type=bind,src=${SHARED_DATASETS},dst=/datasets,readonly")
+    echo "=== shared datasets: ${SHARED_DATASETS} -> /datasets (ro) ==="
+else
+    echo "=== shared datasets absent: ${SHARED_DATASETS} ==="
+fi
 
 echo "=== node: $(hostname) ==="
 echo "=== job: ${SLURM_JOB_ID} ==="
@@ -103,12 +119,16 @@ echo "=== notebook execution ==="
 
 docker run \
     --rm \
+    --name "${CONTAINER_NAME}" \
+    --label "dgx.slurm_job=${SLURM_JOB_ID}" \
+    --label "dgx.user=${USER}" \
     "${GPU_ARGS[@]}" \
     --shm-size=1g \
     --ulimit memlock=-1 \
     --ulimit stack=67108864 \
     --mount \
     "type=bind,src=${SCRIPT_DIR}/outputs,dst=/workspace/outputs" \
+    "${DATASET_MOUNT[@]}" \
     "${IMAGE_TAG}"
 
 echo

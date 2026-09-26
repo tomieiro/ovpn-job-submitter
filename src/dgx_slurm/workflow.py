@@ -96,6 +96,7 @@ async def run_notebook_async(
     output: Path | str | None = None,
     stream: bool = True,
     detach: bool = False,
+    keep_vpn: bool = False,
     password_provider: Callable[[], str] | None = None,
     host_key_confirmer: Callable[[str, str], bool] | None = None,
 ) -> JobResult | str:
@@ -127,7 +128,7 @@ async def run_notebook_async(
     download_root = notebook.parent / ".dgx-results"
 
     with tempfile.TemporaryDirectory(prefix="dgx-slurm-bundles-") as workdir:
-        client_options = {}
+        client_options = {"keep_vpn": keep_vpn}
         if password_provider is not None:
             client_options["password_provider"] = password_provider
         if host_key_confirmer is not None:
@@ -225,6 +226,7 @@ def _save_logs(result: JobResult, destination: Path) -> tuple[Path, ...]:
 async def collect_results_async(
     job_id: str,
     *,
+    keep_vpn: bool = False,
     password_provider: Callable[[], str] | None = None,
     host_key_confirmer: Callable[[str, str], bool] | None = None,
     save_logs: bool = False,
@@ -248,7 +250,7 @@ async def collect_results_async(
 
     ovpn_path = discover_ovpn(record["vpn_dir"])
     known_hosts = Path.home() / ".ssh" / "known_hosts"
-    client_options = {}
+    client_options = {"keep_vpn": keep_vpn}
     if password_provider is not None:
         client_options["password_provider"] = password_provider
     if host_key_confirmer is not None:

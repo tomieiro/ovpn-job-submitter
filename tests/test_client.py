@@ -19,9 +19,10 @@ def make_notebook(path):
 
 
 class FakeVPN:
-    def __init__(self):
+    def __init__(self, started_by_us=True):
         self.connect_calls = 0
         self.disconnect_calls = 0
+        self.started_by_us = started_by_us
 
     def connect(self):
         self.connect_calls += 1
@@ -326,3 +327,29 @@ def test_job_store_listing_is_a_copy(tmp_path):
     store.list_all()["48192"]["job_name"] = "mutated"
 
     assert store.load("48192")["job_name"] == "dgx-notebook-abc"
+
+
+def test_close_drops_the_tunnel_by_default(project, tmp_path, client_parts):
+    _, vpn, _, _, _ = client_parts
+    client = make_client(project, tmp_path, client_parts)
+    client.close()
+    assert vpn.disconnect_calls == 1
+
+
+def test_keep_vpn_leaves_a_tunnel_we_opened_running(project, tmp_path, client_parts):
+    """The next invocation can then take VPNConnection's is_reachable path."""
+    _, vpn, _, _, _ = client_parts
+    client = make_client(project, tmp_path, client_parts, keep_vpn=True)
+    client.close()
+    assert vpn.disconnect_calls == 0
+
+
+def test_keep_vpn_still_releases_a_tunnel_we_did_not_open(project, tmp_path, tmp_path_factory):
+    """Nothing we did not start is ours to keep, so it is released as usual."""
+    calls = []
+    vpn = FakeVPN(started_by_us=False)
+    parts = (calls, vpn, FakeTransport(calls), FakeScheduler(calls),
+             LocalJobStore(tmp_path / "jobs.json"))
+    client = make_client(project, tmp_path, parts, keep_vpn=True)
+    client.close()
+    assert vpn.disconnect_calls == 1
