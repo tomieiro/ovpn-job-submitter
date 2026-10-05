@@ -40,7 +40,7 @@ def test_renders_resources_into_sbatch_directives(build):
     content = (bundle_root / "runImage.slurm").read_text()
     assert "#SBATCH --cpus-per-task=8" in content
     assert "#SBATCH --gres=gpu:2" in content
-    assert "#SBATCH --mem=64G" in content
+    assert "#SBATCH --mem=" not in content
     assert "#SBATCH --time=02:00:00" in content
     assert "#SBATCH --partition=research" in content
     assert "__" not in content  # no leftover placeholders

@@ -147,12 +147,17 @@ def test_window_runs_the_job_and_reports_the_executed_notebook(
     app.submit_panel.notebook.set(str(notebook))
     app.submit_panel.vpn_dir.set(str(vpn_dir))
     app.submit_panel.include_files.set(True)
+    app.submit_panel.gpus.set("3")
+    app.submit_panel.time_limit.set("08:00:00")
     app.submit_panel.start_job()
 
     assert pump(tk_root, lambda: bool(shown))
     assert calls["notebook"] == notebook
     assert calls["vpn_dir"] == vpn_dir
     assert calls["include_project_files"] is True
+    assert calls["gpus"] == 3
+    assert calls["cpus"] == 12
+    assert calls["time_limit"] == "08:00:00"
     assert calls["password_provider"]() == "senha"
     assert "Job submetido: 48192" in app._log.get("1.0", "end")
     assert str(notebook.with_name("experiment.executed.ipynb")) in shown[-1][1]

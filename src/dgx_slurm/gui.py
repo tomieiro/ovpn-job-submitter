@@ -20,7 +20,6 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from .cli import (
-    DEFAULT_CPUS,
     DEFAULT_GPUS,
     DEFAULT_MEMORY,
     DEFAULT_PARTITION,
@@ -150,6 +149,10 @@ class SubmitPanel(ttk.Frame):
         self.notebook = tk.StringVar()
         self.vpn_dir = tk.StringVar()
         self.include_files = tk.BooleanVar(value=False)
+        self.gpus = tk.StringVar(value=str(DEFAULT_GPUS))
+        self.cpus = tk.StringVar(value=str(DEFAULT_GPUS * 4))
+        self.time_limit = tk.StringVar(value=DEFAULT_TIME_LIMIT)
+        self.gpus.trace_add("write", self._update_default_cpus)
 
         self._build()
 
@@ -182,8 +185,16 @@ class SubmitPanel(ttk.Frame):
             variable=self.include_files,
         ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(8, 4))
 
+        resources = ttk.Frame(self)
+        resources.grid(row=3, column=0, columnspan=3, sticky="ew", pady=4)
+        for column in range(3):
+            resources.columnconfigure(column, weight=1)
+        self._resource_field(resources, "Horas (HH:MM:SS)", self.time_limit, 0)
+        self._resource_field(resources, "GPUs", self.gpus, 1)
+        self._resource_field(resources, "CPUs", self.cpus, 2)
+
         buttons = ttk.Frame(self)
-        buttons.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(4, 0))
+        buttons.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(4, 0))
         buttons.columnconfigure(0, weight=1)
         buttons.columnconfigure(1, weight=1)
         self.run_button = ttk.Button(
@@ -198,8 +209,22 @@ class SubmitPanel(ttk.Frame):
         self.detach_button.grid(row=0, column=1, sticky="ew", padx=(4, 0))
 
         ttk.Label(self, text=DETACH_HINT, wraplength=560).grid(
-            row=4, column=0, columnspan=3, sticky="w", pady=(8, 0)
+            row=5, column=0, columnspan=3, sticky="w", pady=(8, 0)
         )
+
+    def _resource_field(
+        self, master: ttk.Frame, label: str, variable: tk.StringVar, column: int
+    ) -> None:
+        field = ttk.Frame(master)
+        field.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 8, 8))
+        ttk.Label(field, text=label).pack(anchor="w")
+        ttk.Entry(field, textvariable=variable, width=14).pack(fill="x")
+
+    def _update_default_cpus(self, *_args) -> None:
+        try:
+            self.cpus.set(str(int(self.gpus.get()) * 4))
+        except ValueError:
+            pass
 
     def _choose_notebook(self) -> None:
         selected = filedialog.askopenfilename(
@@ -232,6 +257,16 @@ class SubmitPanel(ttk.Frame):
             return
 
         include_files = self.include_files.get()
+        try:
+            gpus = int(self.gpus.get())
+            cpus = int(self.cpus.get())
+        except ValueError:
+            messagebox.showerror(WINDOW_TITLE, "GPUs e CPUs devem ser números inteiros.")
+            return
+        if gpus < 1 or cpus < 1:
+            messagebox.showerror(WINDOW_TITLE, "GPUs e CPUs devem ser maiores que zero.")
+            return
+        time_limit = self.time_limit.get().strip()
         executed = notebook.with_name(f"{notebook.stem}.executed.ipynb")
 
         def work() -> str:
@@ -242,10 +277,10 @@ class SubmitPanel(ttk.Frame):
                 ssh_host=DEFAULT_SSH_HOST,
                 ssh_port=DEFAULT_SSH_PORT,
                 partition=DEFAULT_PARTITION,
-                gpus=DEFAULT_GPUS,
-                cpus=DEFAULT_CPUS,
+                gpus=gpus,
+                cpus=cpus,
                 memory=DEFAULT_MEMORY,
-                time_limit=DEFAULT_TIME_LIMIT,
+                time_limit=time_limit,
                 detach=detach,
                 password_provider=lambda: password,
                 host_key_confirmer=self._shell.confirm_host_key,

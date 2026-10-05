@@ -7,7 +7,6 @@
 #SBATCH --ntasks=__TASKS__
 #SBATCH --cpus-per-task=__CPUS__
 #SBATCH --gres=gpu:__GPUS__
-#SBATCH --mem=__MEMORY__
 #SBATCH --partition=__PARTITION__
 
 set -euo pipefail
