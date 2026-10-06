@@ -173,7 +173,7 @@ class SSHTransport:
         if self._password is None and self._password_provider is not None:
             attempts = [None, self._password_provider]
 
-        last: paramiko.AuthenticationException | None = None
+        last: paramiko.SSHException | None = None
         for attempt in attempts:
             secret = attempt() if callable(attempt) else attempt
             try:
@@ -188,7 +188,11 @@ class SSHTransport:
                 if secret is not None:
                     self._password = secret
                 return client
-            except paramiko.AuthenticationException as exc:
+            except paramiko.SSHException as exc:
+                if not isinstance(exc, paramiko.AuthenticationException) and str(exc) != (
+                    "No authentication methods available"
+                ):
+                    raise
                 last = exc
         raise last if last is not None else paramiko.AuthenticationException(
             "authentication failed"

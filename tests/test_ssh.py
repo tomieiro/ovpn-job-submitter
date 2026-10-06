@@ -515,3 +515,25 @@ def test_password_is_requested_only_after_the_keys_are_refused():
     client = FakeSSHClient.instances[-1]
     assert asked == [1]
     assert [a["password"] for a in client.connect_attempts] == [None, "secret"]
+
+
+def test_password_is_tried_when_paramiko_reports_no_authentication_methods():
+    FakeSSHClient.instances.clear()
+
+    class NoKeysClient(FakeSSHClient):
+        def connect(self, **kwargs):
+            if kwargs.get("password") is None:
+                self.connect_attempts.append(kwargs)
+                raise paramiko.SSHException("No authentication methods available")
+            super().connect(**kwargs)
+
+    transport = SSHTransport(
+        host="cluster.internal",
+        username="user",
+        password_provider=lambda: "secret",
+        client_factory=NoKeysClient,
+    )
+    transport.connect()
+
+    client = FakeSSHClient.instances[-1]
+    assert [a["password"] for a in client.connect_attempts] == [None, "secret"]
